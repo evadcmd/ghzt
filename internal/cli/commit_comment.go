@@ -48,8 +48,8 @@ func newCommitCommentCmd(s IO) *cobra.Command {
 			if path == "" {
 				return errors.New("--position requires --path")
 			}
-			if position < 0 {
-				return fmt.Errorf("invalid position %d: must not be negative", position)
+			if position < 1 {
+				return fmt.Errorf("invalid position %d: must be at least 1", position)
 			}
 			fields["position"] = position
 		}

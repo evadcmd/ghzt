@@ -204,6 +204,10 @@ func TestSetEditsApply(t *testing.T) {
 	if got := e.apply([]string{"a"}); got == nil || len(got) != 0 {
 		t.Errorf("removing the last one = %#v, want an empty, non-nil slice", got)
 	}
+	e = setEdits{add: []string{"Bug", "P1", "new"}, remove: []string{"OCTOCAT"}}
+	if got, want := e.apply([]string{"bug", "Octocat", "p1"}), []string{"bug", "p1", "new"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("case-insensitive apply = %q, want %q", got, want)
+	}
 }
 
 var prURL = map[string]any{"number": 7, "html_url": "https://github.com/o/r/pull/7"}
@@ -323,6 +327,7 @@ func TestCommitComment(t *testing.T) {
 	}{
 		{[]string{"main", "-b", "x"}, "invalid commit SHA"},
 		{[]string{"abc1234", "-b", "x", "--position", "1"}, "--position requires --path"},
+		{[]string{"abc1234", "-b", "x", "--path", "a.go", "--position", "0"}, "must be at least 1"},
 		{[]string{"abc1234", "-b", "x", "--path", "../x"}, "invalid path"},
 		{[]string{"abc1234"}, "--body or --body-file required"},
 	} {

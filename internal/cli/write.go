@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -97,15 +98,21 @@ func addSetEditFlags(cmd *cobra.Command, name, what string) *setEdits {
 func (e *setEdits) changed() bool { return len(e.add) > 0 || len(e.remove) > 0 }
 
 // apply returns current with the removals dropped and the additions appended,
-// in order and without duplicates.
+// in order and without duplicates. GitHub matches label names and logins
+// case-insensitively, so this does too, and keeps the spelling already on the
+// issue.
 func (e *setEdits) apply(current []string) []string {
 	out := []string{}
 	for _, v := range append(slices.Clone(current), e.add...) {
-		if !slices.Contains(e.remove, v) && !slices.Contains(out, v) {
+		if !containsFold(e.remove, v) && !containsFold(out, v) {
 			out = append(out, v)
 		}
 	}
 	return out
+}
+
+func containsFold(list []string, v string) bool {
+	return slices.ContainsFunc(list, func(s string) bool { return strings.EqualFold(s, v) })
 }
 
 // newCommentCmd is gh issue comment and gh pr comment: both are a comment on
