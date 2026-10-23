@@ -81,7 +81,8 @@ func newPRCmd(s IO) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  func(c *cobra.Command, _ []string) error { return c.Help() },
 	}
-	cmd.AddCommand(newPRViewCmd(s), newPRListCmd(s))
+	cmd.AddCommand(newPRViewCmd(s), newPRListCmd(s), newPRCreateCmd(s), newPREditCmd(s),
+		newCommentCmd(s, "a pull request"))
 	return cmd
 }
 
@@ -213,16 +214,9 @@ func newPRListCmd(s IO) *cobra.Command {
 			q.Set("base", base)
 		}
 		if head != "" {
-			// The API wants "owner:branch"; gh takes a bare branch as one in
-			// the repo itself.
-			owner, branch, ok := strings.Cut(head, ":")
-			if !ok {
-				owner, branch = repo.ref.owner, head
-			}
-			if err := checkOwner(owner); err != nil {
-				return err
-			}
-			if err := checkBranch(branch); err != nil {
+			// The API wants "owner:branch" here.
+			owner, branch, err := parseHead(repo.ref, head)
+			if err != nil {
 				return err
 			}
 			q.Set("head", owner+":"+branch)

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,7 +26,7 @@ const apiURL = "https://api.github.com"
 // maxPerPage is the largest page the REST API returns.
 const maxPerPage = 100
 
-// apiClient makes GET requests to the REST API.
+// apiClient makes requests to the REST API.
 type apiClient struct {
 	http *http.Client
 }
@@ -86,25 +87,59 @@ func (c *apiClient) getRaw(ctx context.Context, path string, query url.Values, a
 	return data, resp.Header, nil
 }
 
+// send makes a write request: body, if not nil, goes as JSON, and the JSON
+// response is decoded into v, if not nil.
+func (c *apiClient) send(ctx context.Context, method, path string, body, v any) error {
+	var r io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		r = bytes.NewReader(data)
+	}
+	resp, err := c.request(ctx, method, path, nil, "application/vnd.github+json", r)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if v == nil || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+		return fmt.Errorf("decode response to %s %s: %w", method, path, err)
+	}
+	return nil
+}
+
 // do sends GET path?query and returns the response if it is a success; the
 // caller closes its body.
 func (c *apiClient) do(ctx context.Context, path string, query url.Values, accept string) (*http.Response, error) {
+	return c.request(ctx, http.MethodGet, path, query, accept, nil)
+}
+
+// request sends method path?query with body, a JSON document if not nil, and
+// returns the response if it is a success; the caller closes its body.
+func (c *apiClient) request(ctx context.Context, method, path string, query url.Values, accept string, body io.Reader) (*http.Response, error) {
 	u := apiURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", accept)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		defer func() { _ = resp.Body.Close() }()
-		return nil, apiError(resp, http.MethodGet, path)
+		return nil, apiError(resp, method, path)
 	}
 	return resp, nil
 }
