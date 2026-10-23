@@ -68,6 +68,29 @@ func checkBranch(branch string) error {
 	return nil
 }
 
+// checkRef checks a branch, tag or commit SHA. Unlike a branch name, it is
+// split at "/" into path segments, so none of them may be empty, "." or "..".
+// git's "HEAD~1"-style revisions are refused: the API doesn't take them.
+func checkRef(ref string) error {
+	if len(ref) > maxBranchLen || !branchRE.MatchString(ref) || strings.HasPrefix(ref, "-") ||
+		strings.Contains(ref, "..") || strings.Contains(ref, "@{") ||
+		checkRepoPath(ref) != nil {
+		return fmt.Errorf("invalid ref %q", ref)
+	}
+	return nil
+}
+
+// checkRepoPath checks a path inside a repo, relative to its root, with no
+// empty, "." or ".." segments.
+func checkRepoPath(p string) error {
+	for seg := range strings.SplitSeq(p, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("invalid path %q", p)
+		}
+	}
+	return nil
+}
+
 // repoFlag is -R/--repo. It is a flag value so that a malformed repo is a
 // flag error, reported before any request.
 type repoFlag struct {

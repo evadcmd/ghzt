@@ -6,8 +6,10 @@ package ghapi
 import (
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 
 	ghAPI "github.com/cli/go-gh/v2/pkg/api"
@@ -41,7 +43,7 @@ func NewHTTPClient(opts Options) (*http.Client, error) {
 	clientOpts := ghAPI.ClientOptions{
 		Host:         "none",
 		AuthToken:    "none",
-		Transport:    transport,
+		Transport:    hideRawType{transport},
 		LogIgnoreEnv: true,
 		Headers: map[string]string{
 			"User-Agent":           "ghzt " + opts.AppVersion,
@@ -59,10 +61,59 @@ func NewHTTPClient(opts Options) (*http.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create GitHub API client: %w", err)
 	}
+	client.Transport = restoreRawType{client.Transport}
 	if opts.Source != nil {
 		client.Transport = &auth.Transport{Source: opts.Source, Base: client.Transport}
 	}
 	return client, nil
+}
+
+// rawTypeHeader holds a raw response's Content-Type on its way through
+// go-gh's transports.
+const rawTypeHeader = "X-Ghzt-Raw-Content-Type"
+
+// rawTypeRE matches the media types of the raw contents of a file, which
+// GitHub may send as "application/vnd.github.raw+json".
+var rawTypeRE = regexp.MustCompile(`^application/vnd\.github(\.v3)?\.raw(\+json)?$`)
+
+// hideRawType goes under go-gh's transports. go-gh rewrites the control
+// characters in any response whose Content-Type ends in json, so it can't
+// smuggle terminal escapes in a JSON string; on a raw file that corrupts the
+// bytes, a NUL becoming "^@". The Content-Type of a raw response is moved
+// aside, so go-gh leaves the body alone, and restoreRawType puts it back.
+type hideRawType struct {
+	rt http.RoundTripper
+}
+
+func (h hideRawType) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := h.rt.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	resp.Header.Del(rawTypeHeader)
+	ct := resp.Header.Get("Content-Type")
+	if mt, _, perr := mime.ParseMediaType(ct); perr == nil && rawTypeRE.MatchString(mt) {
+		resp.Header.Del("Content-Type")
+		resp.Header.Set(rawTypeHeader, ct)
+	}
+	return resp, nil
+}
+
+// restoreRawType goes over go-gh's transports and undoes hideRawType.
+type restoreRawType struct {
+	rt http.RoundTripper
+}
+
+func (r restoreRawType) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := r.rt.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	if ct := resp.Header.Get(rawTypeHeader); ct != "" {
+		resp.Header.Del(rawTypeHeader)
+		resp.Header.Set("Content-Type", ct)
+	}
+	return resp, nil
 }
 
 // isDebugEnabled is cli/cli's utils.IsDebugEnabled: GH_DEBUG if set, else the

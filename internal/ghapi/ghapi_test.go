@@ -128,6 +128,48 @@ func TestNewHTTPClientLog(t *testing.T) {
 	}
 }
 
+func TestNewHTTPClientSanitize(t *testing.T) {
+	tests := []struct {
+		contentType, body, want string
+	}{
+		// go-gh's sanitizing stays on for JSON...
+		{"application/json; charset=utf-8", `{"name":"a\u001b[31m"}`, `{"name":"a^[[31m"}`},
+		// ...but a raw file comes through byte for byte, whatever it holds.
+		{"application/vnd.github.raw+json; charset=utf-8", "a\x00b\x1b[31m\\u0000", "a\x00b\x1b[31m\\u0000"},
+		{"application/vnd.github.v3.raw", "a\x00b", "a\x00b"},
+	}
+	for _, tt := range tests {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", tt.contentType)
+			w.Header().Set(rawTypeHeader, "text/plain") // not the server's to set
+			_, _ = io.WriteString(w, tt.body)
+		}))
+		client, err := NewHTTPClient(Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := client.Get(srv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		srv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tt.want {
+			t.Errorf("%s: body = %q, want %q", tt.contentType, got, tt.want)
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != tt.contentType {
+			t.Errorf("%s: Content-Type = %q", tt.contentType, ct)
+		}
+		if h := resp.Header.Get(rawTypeHeader); h != "" {
+			t.Errorf("%s: %s = %q, want it removed", tt.contentType, rawTypeHeader, h)
+		}
+	}
+}
+
 func TestNewHTTPClientNoLogWriter(t *testing.T) {
 	t.Setenv("GH_DEBUG", "api")
 	// Nothing to assert on but that it doesn't panic or write anywhere else.
