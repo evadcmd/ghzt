@@ -231,3 +231,55 @@ func TestTransport(t *testing.T) {
 		t.Errorf("err = %v, want the token source's error", err)
 	}
 }
+
+func TestTransportRedirect(t *testing.T) {
+	echo := func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.Header.Get("Authorization"))) //nolint:gosec // G705: echoes a header back to the test client.
+	}
+	other := httptest.NewServer(http.HandlerFunc(echo))
+	defer other.Close()
+	// other listens on 127.0.0.1 too; reach it as localhost to change the
+	// hostname, not just the port.
+	otherLocalhost := strings.Replace(other.URL, "127.0.0.1", "localhost", 1)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/echo", echo)
+	api := httptest.NewServer(mux)
+	defer api.Close()
+	for path, to := range map[string]string{
+		"/same":       api.URL + "/echo",
+		"/other-host": otherLocalhost + "/",
+		"/other-port": other.URL + "/",
+	} {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, to, http.StatusFound)
+		})
+	}
+
+	client := &http.Client{Transport: &Transport{Source: staticToken("ghs_x")}}
+	for _, tt := range []struct{ path, want string }{
+		{"/echo", "Bearer ghs_x"},
+		{"/same", "Bearer ghs_x"},
+		{"/other-host", ""},
+		{"/other-port", ""},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, api.URL+tt.path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != tt.want {
+				t.Errorf("redirect target saw Authorization %q, want %q", body, tt.want)
+			}
+		})
+	}
+}

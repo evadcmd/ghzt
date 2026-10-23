@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -133,7 +134,11 @@ func parseID(name, value string) (int64, error) {
 }
 
 // Transport sets the Authorization header from Source on every request,
-// then sends it with Base (http.DefaultTransport if nil).
+// then sends it with Base (http.DefaultTransport if nil). A redirect to
+// another host goes out without the token, as gh does: GitHub redirects
+// tarballs, release assets and Actions logs to storage hosts that don't need
+// it, and http.Client's own stripping of Authorization on a cross-host
+// redirect can't help, since the token is added here, after the Client.
 type Transport struct {
 	Source TokenSource
 	Base   http.RoundTripper
@@ -141,6 +146,14 @@ type Transport struct {
 
 // RoundTrip implements http.RoundTripper.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	// http.Client sets Response on the request it sends to follow a redirect.
+	if req.Response != nil && req.Response.Request != nil && !strings.EqualFold(host(req), host(req.Response.Request)) {
+		return base.RoundTrip(req)
+	}
 	token, err := t.Source.Token(req.Context())
 	if err != nil {
 		if req.Body != nil {
@@ -151,9 +164,13 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// A RoundTripper must not modify the request it was given.
 	req = req.Clone(req.Context())
 	req.Header.Set("Authorization", "Bearer "+token)
-	base := t.Base
-	if base == nil {
-		base = http.DefaultTransport
-	}
 	return base.RoundTrip(req)
+}
+
+// host is the host req is sent to, with its port if the URL has one.
+func host(req *http.Request) string {
+	if req.Host != "" {
+		return req.Host
+	}
+	return req.URL.Host
 }
