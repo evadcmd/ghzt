@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/bradleyfalzon/ghinstallation/v2"
 )
 
@@ -15,17 +18,41 @@ import (
 const (
 	// EnvToken is a ready-made token, e.g. a GitHub App installation token.
 	EnvToken = "GHZT_TOKEN" //nolint:gosec // G101: an env var name, not a credential.
-	// EnvAppID, EnvInstallationID and EnvPrivateKeyPath are a GitHub App's
+	// EnvAppID and EnvInstallationID, plus the private key from either
+	// EnvPrivateKeyPath or EnvPrivateKeySecret, are a GitHub App's
 	// credentials, to mint installation tokens with.
 	EnvAppID          = "GHZT_APP_ID"
 	EnvInstallationID = "GHZT_INSTALLATION_ID"
 	EnvPrivateKeyPath = "GHZT_PRIVATE_KEY_PATH"
+	// EnvPrivateKeySecret is the name or ARN of an AWS Secrets Manager secret
+	// holding the PEM private key, read with the default AWS credential chain.
+	EnvPrivateKeySecret = "GHZT_PRIVATE_KEY_SECRET" //nolint:gosec // G101: an env var name, not a credential.
 )
 
 // ErrNoCredentials means the environment has neither a token nor app
 // credentials.
 var ErrNoCredentials = errors.New("no GitHub credentials: set " + EnvToken +
-	", or " + EnvAppID + ", " + EnvInstallationID + " and " + EnvPrivateKeyPath)
+	", or " + EnvAppID + ", " + EnvInstallationID + " and " + EnvPrivateKeyPath +
+	" or " + EnvPrivateKeySecret)
+
+// A secretFetcher returns the value of the secret named id.
+type secretFetcher func(ctx context.Context, id string) ([]byte, error)
+
+// awsSecret reads a secret from AWS Secrets Manager.
+func awsSecret(ctx context.Context, id string) ([]byte, error) {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := secretsmanager.NewFromConfig(cfg).GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{SecretId: &id})
+	if err != nil {
+		return nil, err
+	}
+	if out.SecretString != nil {
+		return []byte(*out.SecretString), nil
+	}
+	return out.SecretBinary, nil
+}
 
 // A TokenSource returns a token for the Authorization header. A source that
 // mints tokens caches them and refreshes them before they expire.
@@ -42,24 +69,35 @@ func (t staticToken) Token(context.Context) (string, error) { return string(t), 
 // EnvToken wins: taruza mints a short-lived installation token and passes it
 // in, so the app's private key never reaches the agent. The app credentials
 // are for running ghzt by hand outside taruza, with the developer's own key
-// file; base is the transport the installation token requests go through.
-func FromEnv(getenv func(string) string, base http.RoundTripper) (TokenSource, error) {
+// file or AWS secret; base is the transport the installation token requests
+// go through.
+func FromEnv(ctx context.Context, getenv func(string) string, base http.RoundTripper) (TokenSource, error) {
+	return fromEnv(ctx, getenv, base, awsSecret)
+}
+
+func fromEnv(ctx context.Context, getenv func(string) string, base http.RoundTripper, fetch secretFetcher) (TokenSource, error) {
 	if token := getenv(EnvToken); token != "" {
 		return staticToken(token), nil
 	}
-	appID, installationID, keyPath := getenv(EnvAppID), getenv(EnvInstallationID), getenv(EnvPrivateKeyPath)
-	if appID == "" && installationID == "" && keyPath == "" {
+	appID, installationID := getenv(EnvAppID), getenv(EnvInstallationID)
+	keyPath, keySecret := getenv(EnvPrivateKeyPath), getenv(EnvPrivateKeySecret)
+	if appID == "" && installationID == "" && keyPath == "" && keySecret == "" {
 		return nil, ErrNoCredentials
 	}
 	for _, v := range []struct{ name, value string }{
 		{EnvAppID, appID},
 		{EnvInstallationID, installationID},
-		{EnvPrivateKeyPath, keyPath},
 	} {
 		if v.value == "" {
-			return nil, fmt.Errorf("%s is not set; app credentials need all of %s, %s and %s",
-				v.name, EnvAppID, EnvInstallationID, EnvPrivateKeyPath)
+			return nil, fmt.Errorf("%s is not set; app credentials need %s, %s, and %s or %s",
+				v.name, EnvAppID, EnvInstallationID, EnvPrivateKeyPath, EnvPrivateKeySecret)
 		}
+	}
+	switch {
+	case keyPath == "" && keySecret == "":
+		return nil, fmt.Errorf("app credentials need a private key: set %s or %s", EnvPrivateKeyPath, EnvPrivateKeySecret)
+	case keyPath != "" && keySecret != "":
+		return nil, fmt.Errorf("set only one of %s and %s", EnvPrivateKeyPath, EnvPrivateKeySecret)
 	}
 	app, err := parseID(EnvAppID, appID)
 	if err != nil {
@@ -69,7 +107,19 @@ func FromEnv(getenv func(string) string, base http.RoundTripper) (TokenSource, e
 	if err != nil {
 		return nil, err
 	}
-	tr, err := ghinstallation.NewKeyFromFile(base, app, installation, keyPath)
+	var key []byte
+	if keyPath != "" {
+		key, err = os.ReadFile(keyPath) //nolint:gosec // G304: the user's own key file, named in their environment.
+		if err != nil {
+			return nil, fmt.Errorf("read GitHub App private key: %w", err)
+		}
+	} else {
+		key, err = fetch(ctx, keySecret)
+		if err != nil {
+			return nil, fmt.Errorf("fetch GitHub App private key from AWS secret %q: %w", keySecret, err)
+		}
+	}
+	tr, err := ghinstallation.New(base, app, installation, key)
 	if err != nil {
 		return nil, fmt.Errorf("load GitHub App private key: %w", err)
 	}

@@ -24,8 +24,19 @@ func env(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
+// secrets fakes AWS Secrets Manager.
+func secrets(m map[string]string) secretFetcher {
+	return func(_ context.Context, id string) ([]byte, error) {
+		v, ok := m[id]
+		if !ok {
+			return nil, errors.New("ResourceNotFoundException")
+		}
+		return []byte(v), nil
+	}
+}
+
 func TestFromEnvPrefersToken(t *testing.T) {
-	ts, err := FromEnv(env(map[string]string{
+	ts, err := FromEnv(context.Background(), env(map[string]string{
 		EnvToken:          "ghs_static",
 		EnvAppID:          "1",
 		EnvInstallationID: "2",
@@ -59,20 +70,41 @@ func TestFromEnvErrors(t *testing.T) {
 			EnvInstallationID + ` must be a positive integer, got "0"`,
 		},
 		{
+			"no key",
+			map[string]string{EnvAppID: "1", EnvInstallationID: "2"},
+			"app credentials need a private key",
+		},
+		{
+			"two keys",
+			map[string]string{EnvAppID: "1", EnvInstallationID: "2", EnvPrivateKeyPath: "k.pem", EnvPrivateKeySecret: "ghzt/key"},
+			"set only one of " + EnvPrivateKeyPath + " and " + EnvPrivateKeySecret,
+		},
+		{
 			"missing key file",
 			map[string]string{EnvAppID: "1", EnvInstallationID: "2", EnvPrivateKeyPath: "/nonexistent.pem"},
+			"read GitHub App private key",
+		},
+		{
+			"missing secret",
+			map[string]string{EnvAppID: "1", EnvInstallationID: "2", EnvPrivateKeySecret: "ghzt/missing"},
+			`fetch GitHub App private key from AWS secret "ghzt/missing": ResourceNotFoundException`,
+		},
+		{
+			"secret is not a key",
+			map[string]string{EnvAppID: "1", EnvInstallationID: "2", EnvPrivateKeySecret: "ghzt/garbage"},
 			"load GitHub App private key",
 		},
 	}
+	fetch := secrets(map[string]string{"ghzt/garbage": "not a pem"})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := FromEnv(env(tt.env), nil)
+			_, err := fromEnv(context.Background(), env(tt.env), nil, fetch)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("err = %v, want it to contain %q", err, tt.want)
 			}
 		})
 	}
-	if _, err := FromEnv(env(nil), nil); !errors.Is(err, ErrNoCredentials) {
+	if _, err := FromEnv(context.Background(), env(nil), nil); !errors.Is(err, ErrNoCredentials) {
 		t.Errorf("err = %v, want ErrNoCredentials", err)
 	}
 }
@@ -88,41 +120,76 @@ func TestFromEnvMintsInstallationToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.Method != http.MethodPost || r.URL.Path != "/app/installations/42/access_tokens" {
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-			t.Errorf("Authorization = %q, want a bearer JWT", r.Header.Get("Authorization"))
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:gosec // G101: a fake test token.
-			"token":      "ghs_minted",
-			"expires_at": time.Now().Add(time.Hour).Format(time.RFC3339),
+	fetch := secrets(map[string]string{"ghzt/key": string(keyPEM)})
+
+	for _, key := range []struct{ name, value string }{
+		{EnvPrivateKeyPath, keyPath},
+		{EnvPrivateKeySecret, "ghzt/key"},
+	} {
+		t.Run(key.name, func(t *testing.T) {
+			var calls int
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.Method != http.MethodPost || r.URL.Path != "/app/installations/42/access_tokens" {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+				}
+				if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+					t.Errorf("Authorization = %q, want a bearer JWT", r.Header.Get("Authorization"))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:gosec // G101: a fake test token.
+					"token":      "ghs_minted",
+					"expires_at": time.Now().Add(time.Hour).Format(time.RFC3339),
+				})
+			}))
+			defer srv.Close()
+
+			ts, err := fromEnv(context.Background(), env(map[string]string{
+				EnvAppID:          "7",
+				EnvInstallationID: "42",
+				key.name:          key.value,
+			}), srv.Client().Transport, fetch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ts.(*ghinstallation.Transport).BaseURL = srv.URL
+
+			for range 2 {
+				got, err := ts.Token(context.Background())
+				if err != nil || got != "ghs_minted" {
+					t.Fatalf("Token() = %q, %v; want ghs_minted", got, err)
+				}
+			}
+			if calls != 1 {
+				t.Errorf("token endpoint called %d times, want 1 (cached)", calls)
+			}
 		})
+	}
+}
+
+func TestAWSSecret(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Amz-Target"); got != "secretsmanager.GetSecretValue" {
+			t.Errorf("X-Amz-Target = %q", got)
+		}
+		var in struct{ SecretId string }
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+		_ = json.NewEncoder(w).Encode(map[string]string{"Name": in.SecretId, "SecretString": "pem for " + in.SecretId})
 	}))
 	defer srv.Close()
+	t.Setenv("AWS_ENDPOINT_URL_SECRETS_MANAGER", srv.URL)
+	t.Setenv("AWS_REGION", "ap-northeast-1")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIDTEST")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "none"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "none"))
 
-	ts, err := FromEnv(env(map[string]string{
-		EnvAppID:          "7",
-		EnvInstallationID: "42",
-		EnvPrivateKeyPath: keyPath,
-	}), srv.Client().Transport)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ts.(*ghinstallation.Transport).BaseURL = srv.URL
-
-	for range 2 {
-		got, err := ts.Token(context.Background())
-		if err != nil || got != "ghs_minted" {
-			t.Fatalf("Token() = %q, %v; want ghs_minted", got, err)
-		}
-	}
-	if calls != 1 {
-		t.Errorf("token endpoint called %d times, want 1 (cached)", calls)
+	got, err := awsSecret(context.Background(), "ghzt/key")
+	if err != nil || string(got) != "pem for ghzt/key" {
+		t.Errorf("awsSecret() = %q, %v; want %q", got, err, "pem for ghzt/key")
 	}
 }
 
