@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // rawFile returns a handler serving data the way the contents API serves a
@@ -111,6 +112,25 @@ func TestGitShowFileTruncated(t *testing.T) {
 		t.Errorf("stdout is %d bytes, want %d", len(out), maxShowBytes-1)
 	}
 	if want := "… truncated, 6 more bytes; save all of it with -o\n"; errOut != want {
+		t.Errorf("stderr = %q, want %q", errOut, want)
+	}
+}
+
+func TestGitShowFileTruncatedNotUTF8(t *testing.T) {
+	// Latin-1 text has no NUL and no rune starts: the cut backs off at most
+	// one rune's worth instead of to the start.
+	data := "ok\n" + strings.Repeat("\xa9", 2*maxShowBytes)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/contents/latin1.txt", rawFile(data))
+	s := fakeGitHub(t, mux)
+	code, out, errOut := runWith(s, "git", "show", "-R", "o/r", "main:latin1.txt")
+	if code != 0 {
+		t.Fatalf("code %d, stderr %q", code, errOut)
+	}
+	if n := maxShowBytes - (utf8.UTFMax - 1); out != data[:n] {
+		t.Errorf("stdout is %d bytes, want %d", len(out), n)
+	}
+	if want := "… truncated, 100006 more bytes; save all of it with -o\n"; errOut != want {
 		t.Errorf("stderr = %q, want %q", errOut, want)
 	}
 }
@@ -256,6 +276,9 @@ func TestGitShowArgErrors(t *testing.T) {
 		{[]string{"HEAD~1"}, "invalid ref"},
 		{[]string{"a..b"}, "invalid ref"},
 		{[]string{"feature//x"}, "invalid ref"},
+		{[]string{"."}, "invalid ref"},
+		{[]string{"a/./b"}, "invalid ref"},
+		{[]string{"x/."}, "invalid ref"},
 		{[]string{":"}, "invalid path"},
 		{[]string{"main", "--", "../x"}, "invalid path"},
 	} {
@@ -327,6 +350,8 @@ func TestGitLsTreeArgErrors(t *testing.T) {
 		{[]string{"main", "docs"}, "paths need -r"},
 		{[]string{"-r", "main", "../x"}, "invalid path"},
 		{[]string{"x..y"}, "invalid ref"},
+		{[]string{"."}, "invalid ref"},
+		{[]string{"./x"}, "invalid ref"},
 		{nil, "requires at least 1 arg"},
 	} {
 		args := append([]string{"git", "ls-tree", "-R", "o/r"}, tc.args...)

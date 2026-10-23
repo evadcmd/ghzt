@@ -69,12 +69,12 @@ func checkBranch(branch string) error {
 }
 
 // checkRef checks a branch, tag or commit SHA. Unlike a branch name, it is
-// split at "/" into path segments, so none of them may be empty or "..".
+// split at "/" into path segments, so none of them may be empty, "." or "..".
 // git's "HEAD~1"-style revisions are refused: the API doesn't take them.
 func checkRef(ref string) error {
 	if len(ref) > maxBranchLen || !branchRE.MatchString(ref) || strings.HasPrefix(ref, "-") ||
 		strings.Contains(ref, "..") || strings.Contains(ref, "@{") ||
-		strings.HasPrefix(ref, "/") || strings.HasSuffix(ref, "/") || strings.Contains(ref, "//") {
+		checkRepoPath(ref) != nil {
 		return fmt.Errorf("invalid ref %q", ref)
 	}
 	return nil

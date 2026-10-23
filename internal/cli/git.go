@@ -87,7 +87,9 @@ func writeCapped(out, errOut io.Writer, data []byte, hint string) error {
 	n := len(data)
 	if n > maxShowBytes {
 		n = maxShowBytes
-		for n > 0 && !utf8.RuneStart(data[n]) {
+		// A rune is at most utf8.UTFMax bytes, so back off at most that
+		// far; data that isn't UTF-8 is cut at maxShowBytes.
+		for i := 0; i < utf8.UTFMax-1 && n > 0 && !utf8.RuneStart(data[n]); i++ {
 			n--
 		}
 	}
