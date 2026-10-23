@@ -11,7 +11,7 @@ import (
 // rawFile returns a handler serving data the way the contents API serves a
 // file asked for with the raw media type.
 func rawFile(data string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/vnd.github.raw+json; charset=utf-8")
 		_, _ = w.Write([]byte(data))
 	}
@@ -86,7 +86,7 @@ func TestGitShowFileOutput(t *testing.T) {
 	if code != 0 || out != "" || !strings.Contains(errOut, "wrote 100007 bytes to out/logo.png") {
 		t.Fatalf("code %d, stdout %q, stderr %q", code, out, errOut)
 	}
-	got, err := os.ReadFile(filepath.Join(root, "out", "logo.png"))
+	got, err := os.ReadFile(filepath.Join(root, "out", "logo.png")) //nolint:gosec // G304: a path under the test temp dir.
 	if err != nil || string(got) != data {
 		t.Errorf("file = %d bytes, %v; want %d bytes", len(got), err, len(data))
 	}

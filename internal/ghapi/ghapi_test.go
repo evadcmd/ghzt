@@ -139,7 +139,7 @@ func TestNewHTTPClientSanitize(t *testing.T) {
 		{"application/vnd.github.v3.raw", "a\x00b", "a\x00b"},
 	}
 	for _, tt := range tests {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", tt.contentType)
 			w.Header().Set(rawTypeHeader, "text/plain") // not the server's to set
 			_, _ = io.WriteString(w, tt.body)
