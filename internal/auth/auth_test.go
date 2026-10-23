@@ -91,7 +91,7 @@ func TestFromEnvErrors(t *testing.T) {
 		},
 		{
 			"secret is not a key",
-			map[string]string{EnvAppID: "1", EnvInstallationID: "2", EnvPrivateKeySecret: "ghzt/garbage"},
+			map[string]string{EnvAppID: "1", EnvInstallationID: "2", EnvPrivateKeySecret: "ghzt/garbage"}, //nolint:gosec // G101: a fake secret name.
 			"load GitHub App private key",
 		},
 	}
@@ -172,12 +172,14 @@ func TestAWSSecret(t *testing.T) {
 		if got := r.Header.Get("X-Amz-Target"); got != "secretsmanager.GetSecretValue" {
 			t.Errorf("X-Amz-Target = %q", got)
 		}
-		var in struct{ SecretId string }
+		var in struct {
+			SecretID string `json:"SecretId"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			t.Error(err)
 		}
 		w.Header().Set("Content-Type", "application/x-amz-json-1.1")
-		_ = json.NewEncoder(w).Encode(map[string]string{"Name": in.SecretId, "SecretString": "pem for " + in.SecretId})
+		_ = json.NewEncoder(w).Encode(map[string]string{"Name": in.SecretID, "SecretString": "pem for " + in.SecretID})
 	}))
 	defer srv.Close()
 	t.Setenv("AWS_ENDPOINT_URL_SECRETS_MANAGER", srv.URL)
