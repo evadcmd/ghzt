@@ -31,7 +31,13 @@ const shutdownTimeout = 2 * time.Second
 // Setup returns a logger exporting over OTLP/HTTP, configured by the standard
 // OTEL_* variables, and a func that flushes it, to be called before exiting.
 // The logger discards everything if OTEL_SDK_DISABLED is true, no OTLP
-// endpoint is set, or the exporter can't be created.
+// endpoint is set, OTEL_LOGS_EXPORTER doesn't include otlp, or the exporter
+// can't be created.
+//
+// Only OTLP/HTTP with protobuf is supported. A protocol other than
+// http/protobuf in OTEL_EXPORTER_OTLP_LOGS_PROTOCOL or
+// OTEL_EXPORTER_OTLP_PROTOCOL also discards everything, rather than sending
+// HTTP requests that a gRPC collector would reject.
 func Setup(ctx context.Context) (*slog.Logger, func()) {
 	discard := slog.New(slog.DiscardHandler)
 	if !enabled() {
@@ -73,5 +79,34 @@ func enabled() bool {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("OTEL_SDK_DISABLED")), "true") {
 		return false
 	}
+	if !otlpExporter() || !httpProtobuf() {
+		return false
+	}
 	return os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != ""
+}
+
+// otlpExporter reports whether OTEL_LOGS_EXPORTER, a comma-separated list
+// defaulting to otlp, asks for the OTLP exporter. Other exporters, such as
+// console, are ignored: ghzt never writes its logs to the output.
+func otlpExporter() bool {
+	v := strings.TrimSpace(os.Getenv("OTEL_LOGS_EXPORTER"))
+	if v == "" {
+		return true
+	}
+	for e := range strings.SplitSeq(v, ",") {
+		if strings.EqualFold(strings.TrimSpace(e), "otlp") {
+			return true
+		}
+	}
+	return false
+}
+
+// httpProtobuf reports whether the OTLP protocol for logs, defaulting to
+// http/protobuf, is the one the exporter speaks.
+func httpProtobuf() bool {
+	p := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"))
+	if p == "" {
+		p = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"))
+	}
+	return p == "" || p == "http/protobuf"
 }

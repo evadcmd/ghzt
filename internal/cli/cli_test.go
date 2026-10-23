@@ -91,12 +91,35 @@ func TestRunLogsOneRecordOffTheOutput(t *testing.T) {
 	if err := json.Unmarshal(logged.Bytes(), &rec); err != nil {
 		t.Fatalf("log = %q, want one JSON record: %v", logged.String(), err)
 	}
-	if rec["level"] != "ERROR" || rec["name"] != "gh" || rec["exit_code"] != float64(code) ||
-		!strings.Contains(fmt.Sprint(rec["error"]), "bogus") {
+	if rec["level"] != "ERROR" || rec["name"] != "gh" || rec["command"] != "gh" ||
+		rec["exit_code"] != float64(code) || !strings.Contains(fmt.Sprint(rec["error"]), "bogus") {
 		t.Errorf("record = %v", rec)
+	}
+	if _, ok := rec["duration_ms"].(float64); !ok {
+		t.Errorf("duration_ms = %v, want a number", rec["duration_ms"])
 	}
 	if strings.Contains(out.String()+errOut.String(), `"exit_code"`) {
 		t.Errorf("the record leaked into the output: stdout %q, stderr %q", out.String(), errOut.String())
+	}
+}
+
+// The record names the command and the flags that were set, not the raw args,
+// which can hold secrets or whole bodies.
+func TestRunLogsFlagNamesNotArgs(t *testing.T) {
+	var logged bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&logged, nil))
+	s := IO{In: strings.NewReader(""), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, Log: log}
+	Run([]string{"ghzt", "gh", "--version=true"}, s)
+
+	var rec map[string]any
+	if err := json.Unmarshal(logged.Bytes(), &rec); err != nil {
+		t.Fatalf("log = %q, want one JSON record: %v", logged.String(), err)
+	}
+	if rec["command"] != "ghzt gh" || fmt.Sprint(rec["flags"]) != "[version]" {
+		t.Errorf("record = %v, want command %q and flags [version]", rec, "ghzt gh")
+	}
+	if _, ok := rec["args"]; ok || strings.Contains(logged.String(), "--version=true") {
+		t.Errorf("log = %q, want no raw args", logged.String())
 	}
 }
 

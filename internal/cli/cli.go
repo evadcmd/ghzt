@@ -9,8 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // version is set at build time with -ldflags "-X ...cli.version=...".
@@ -34,6 +36,10 @@ type IO struct {
 
 // Run executes the command line args (args[0] included) and returns the exit
 // code. Errors go to ErrOut, prefixed with the name the binary was run as.
+//
+// The log record names the command and the flags that were set, but carries
+// no positional args or flag values: those can be whole issue bodies, commit
+// messages or an Authorization header passed to gh api.
 func Run(args []string, s IO) int {
 	log := s.Log
 	if log == nil {
@@ -42,16 +48,31 @@ func Run(args []string, s IO) int {
 	name := filepath.Base(args[0])
 	cmd := newCommand(name, s)
 	cmd.SetArgs(args[1:])
-	if err := cmd.Execute(); err != nil {
+	start := time.Now()
+	ran, err := cmd.ExecuteC()
+	attrs := []any{
+		"name", name,
+		"command", ran.CommandPath(),
+		"flags", setFlags(ran),
+		"duration_ms", time.Since(start).Milliseconds(),
+	}
+	if err != nil {
 		_, _ = fmt.Fprintf(s.ErrOut, "%s: %v\n", name, err)
 		if fe, ok := errors.AsType[*flagError](err); ok {
 			_, _ = fmt.Fprintf(s.ErrOut, "Run '%s --help' for usage.\n", fe.cmdPath)
 		}
-		log.Error("run", "name", name, "args", args[1:], "exit_code", exitError, "error", err)
+		log.Error("run", append(attrs, "exit_code", exitError, "error", err)...)
 		return exitError
 	}
-	log.Info("run", "name", name, "args", args[1:], "exit_code", exitOK)
+	log.Info("run", append(attrs, "exit_code", exitOK)...)
 	return exitOK
+}
+
+// setFlags returns the names of the flags set on the command line, sorted.
+func setFlags(cmd *cobra.Command) []string {
+	names := []string{}
+	cmd.Flags().Visit(func(f *pflag.Flag) { names = append(names, f.Name) })
+	return names
 }
 
 func newCommand(name string, s IO) *cobra.Command {
