@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"time"
 
@@ -32,6 +33,12 @@ type IO struct {
 	// It must not write to Out or ErrOut, which only carry what gh and git
 	// would print.
 	Log *slog.Logger
+	// Getenv reads the environment the credentials come from; os.Getenv if
+	// nil.
+	Getenv func(string) string
+	// Transport sends the API requests; http.DefaultTransport if nil. Tests
+	// point it at an httptest server.
+	Transport http.RoundTripper
 }
 
 // Run executes the command line args (args[0] included) and returns the exit
@@ -89,7 +96,9 @@ func newCommand(name string, s IO) *cobra.Command {
 }
 
 func newGhCmd(s IO) *cobra.Command {
-	return newRoot("gh", "Work with GitHub issues, pull requests and repos", s)
+	cmd := newRoot("gh", "Work with GitHub issues, pull requests and repos", s)
+	cmd.AddCommand(newIssueCmd(s), newPRCmd(s), newLabelCmd(s), newSearchCmd(s))
+	return cmd
 }
 
 func newGitCmd(s IO) *cobra.Command {
