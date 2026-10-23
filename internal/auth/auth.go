@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -133,7 +134,12 @@ func parseID(name, value string) (int64, error) {
 }
 
 // Transport sets the Authorization header from Source on every request,
-// then sends it with Base (http.DefaultTransport if nil).
+// then sends it with Base (http.DefaultTransport if nil). Once a redirect
+// chain has been to another host, the rest of it goes out without the token:
+// GitHub redirects tarballs, release assets and Actions logs to storage hosts
+// that don't need it, and http.Client's own stripping of Authorization on a
+// cross-host redirect can't help, since the token is added here, after the
+// Client.
 type Transport struct {
 	Source TokenSource
 	Base   http.RoundTripper
@@ -141,6 +147,13 @@ type Transport struct {
 
 // RoundTrip implements http.RoundTripper.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if leftHost(req) {
+		return base.RoundTrip(req)
+	}
 	token, err := t.Source.Token(req.Context())
 	if err != nil {
 		if req.Body != nil {
@@ -151,9 +164,36 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// A RoundTripper must not modify the request it was given.
 	req = req.Clone(req.Context())
 	req.Header.Set("Authorization", "Bearer "+token)
-	base := t.Base
-	if base == nil {
-		base = http.DefaultTransport
-	}
 	return base.RoundTrip(req)
+}
+
+// leftHost reports whether req's redirect chain has been to a host other
+// than the one it started at. Once it has, it stays true for the rest of the
+// chain, even back on the starting host, as http.Client's own stripping does.
+func leftHost(req *http.Request) bool {
+	first := initial(req)
+	for r := req; r != first; r = r.Response.Request {
+		if !strings.EqualFold(host(r), host(first)) {
+			return true
+		}
+	}
+	return false
+}
+
+// initial is the request that started req's redirect chain, or req itself.
+// http.Client sets Response on the request it sends to follow a redirect,
+// and req.Clone keeps it, so each hop links back to the one before.
+func initial(req *http.Request) *http.Request {
+	for req.Response != nil && req.Response.Request != nil {
+		req = req.Response.Request
+	}
+	return req
+}
+
+// host is the host req is sent to, with its port if the URL has one.
+func host(req *http.Request) string {
+	if req.Host != "" {
+		return req.Host
+	}
+	return req.URL.Host
 }
