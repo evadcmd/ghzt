@@ -34,9 +34,9 @@ func Run(args []string, s IO) int {
 	cmd := newCommand(name, s)
 	cmd.SetArgs(args[1:])
 	if err := cmd.Execute(); err != nil {
-		fmt.Fprintf(s.ErrOut, "%s: %v\n", name, err)
+		_, _ = fmt.Fprintf(s.ErrOut, "%s: %v\n", name, err)
 		if fe, ok := errors.AsType[*flagError](err); ok {
-			fmt.Fprintf(s.ErrOut, "Run '%s --help' for usage.\n", fe.cmdPath)
+			_, _ = fmt.Fprintf(s.ErrOut, "Run '%s --help' for usage.\n", fe.cmdPath)
 		}
 		return exitError
 	}

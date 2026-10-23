@@ -104,7 +104,7 @@ func (r *Root) ReadFile(name string, maxBytes int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	// Open follows a symlink, so make sure it is still the file Lstat saw.
 	if opened, err := f.Stat(); err != nil || !os.SameFile(info, opened) {
 		return nil, fmt.Errorf("%s: changed while being opened", name)

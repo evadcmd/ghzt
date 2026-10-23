@@ -98,7 +98,7 @@ func TestFromEnvMintsInstallationToken(t *testing.T) {
 			t.Errorf("Authorization = %q, want a bearer JWT", r.Header.Get("Authorization"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:gosec // G101: a fake test token.
 			"token":      "ghs_minted",
 			"expires_at": time.Now().Add(time.Hour).Format(time.RFC3339),
 		})
@@ -132,7 +132,7 @@ func (failingSource) Token(context.Context) (string, error) { return "", errors.
 
 func TestTransport(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(r.Header.Get("Authorization")))
+		_, _ = w.Write([]byte(r.Header.Get("Authorization"))) //nolint:gosec // G705: echoes a header back to the test client.
 	}))
 	defer srv.Close()
 
@@ -145,7 +145,7 @@ func TestTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)

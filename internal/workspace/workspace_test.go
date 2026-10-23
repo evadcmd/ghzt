@@ -15,7 +15,7 @@ func setup(t *testing.T) (r *Root, base, dir, secret string) {
 	base = filepath.Join(tmp, "workspace")
 	dir = filepath.Join(base, "user")
 	secret = filepath.Join(tmp, "secret.pem")
-	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	for path, content := range map[string]string{
@@ -137,7 +137,7 @@ func TestWriteFile(t *testing.T) {
 	if err := r.WriteFile(filepath.Join(dir, "new", "deep", "out.txt"), []byte("two")); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := os.ReadFile(filepath.Join(dir, "new", "deep", "out.txt")); err != nil || string(got) != "two" {
+	if got, err := os.ReadFile(filepath.Join(dir, "new", "deep", "out.txt")); err != nil || string(got) != "two" { //nolint:gosec // G304: a path under the test temp dir.
 		t.Errorf("file = %q, %v; want two", got, err)
 	}
 
@@ -152,7 +152,7 @@ func TestWriteFile(t *testing.T) {
 			wantErr(t, r.WriteFile(tt.name, []byte("x")), tt.want)
 		})
 	}
-	if got, _ := os.ReadFile(secret); string(got) != "key" {
+	if got, _ := os.ReadFile(secret); string(got) != "key" { //nolint:gosec // G304: a path under the test temp dir.
 		t.Errorf("secret = %q, want it untouched", got)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(secret), "out.txt")); err == nil {

@@ -14,7 +14,7 @@ import (
 // Environment variables FromEnv reads.
 const (
 	// EnvToken is a ready-made token, e.g. a GitHub App installation token.
-	EnvToken = "GHZT_TOKEN"
+	EnvToken = "GHZT_TOKEN" //nolint:gosec // G101: an env var name, not a credential.
 	// EnvAppID, EnvInstallationID and EnvPrivateKeyPath are a GitHub App's
 	// credentials, to mint installation tokens with.
 	EnvAppID          = "GHZT_APP_ID"
