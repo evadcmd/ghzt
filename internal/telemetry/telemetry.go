@@ -47,13 +47,14 @@ func Setup(ctx context.Context) (*slog.Logger, func()) {
 		return discard, func() {}
 	}
 	// resource.WithFromEnv comes last so the OTEL_* variables win.
-	res, err := resource.New(ctx,
+	// The error is ignored: with a non-nil resource it only reports a partial
+	// resource, which still works.
+	res, _ := resource.New(ctx,
 		resource.WithTelemetrySDK(),
 		resource.WithAttributes(semconv.ServiceName(serviceName)),
 		resource.WithFromEnv(),
 	)
 	if res == nil {
-		// Otherwise err only reports a partial resource, which still works.
 		res = resource.Empty()
 	}
 	provider := sdklog.NewLoggerProvider(

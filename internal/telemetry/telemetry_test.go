@@ -34,7 +34,7 @@ func captureStderr(t *testing.T, f func()) string {
 
 func TestSetupExports(t *testing.T) {
 	got := make(chan string, 10)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		got <- r.URL.Path + " " + string(body)
 	}))
