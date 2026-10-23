@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -64,7 +65,12 @@ func readReviewComments(s IO, name string) ([]reviewComment, error) {
 	if err := dec.Decode(&comments); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	if dec.More() {
+	// A null decodes into a nil slice without an error.
+	if comments == nil {
+		return nil, fmt.Errorf("%s: expected a JSON array", name)
+	}
+	// More misses a stray ] or }, so ask for one more token instead.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%s: unexpected data after the JSON array", name)
 	}
 	for i, c := range comments {

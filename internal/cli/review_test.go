@@ -64,6 +64,9 @@ func TestPRReviewInvalid(t *testing.T) {
 		"body.json":     `[{"path": "a.go", "line": 1, "body": ""}]`,
 		"unknown.json":  `[{"path": "a.go", "position": 1, "body": "x"}]`,
 		"trailing.json": `[] []`,
+		"bracket.json":  `[]]`,
+		"brace.json":    `[]}`,
+		"null.json":     `null`,
 		"object.json":   `{"path": "a.go"}`,
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
@@ -84,6 +87,9 @@ func TestPRReviewInvalid(t *testing.T) {
 		{[]string{"-c", "--comments-file", "body.json"}, "body cannot be blank"},
 		{[]string{"-c", "--comments-file", "unknown.json"}, `unknown field "position"`},
 		{[]string{"-c", "--comments-file", "trailing.json"}, "unexpected data after the JSON array"},
+		{[]string{"-c", "--comments-file", "bracket.json"}, "unexpected data after the JSON array"},
+		{[]string{"-c", "--comments-file", "brace.json"}, "unexpected data after the JSON array"},
+		{[]string{"-a", "--comments-file", "null.json"}, "expected a JSON array"},
 		{[]string{"-c", "--comments-file", "object.json"}, "cannot unmarshal object"},
 		{[]string{"-c", "--comments-file", "missing.json"}, "missing.json"},
 		{[]string{"-c", "-F", "-", "--comments-file", "-"}, "can't both read standard input"},
