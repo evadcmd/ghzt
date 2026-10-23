@@ -98,7 +98,7 @@ func newCommand(name string, s IO) *cobra.Command {
 		return newGitCmd(s)
 	default:
 		cmd := newRoot("ghzt", "gh and git backed by the GitHub API", s)
-		cmd.AddCommand(newGhCmd(s), newGitCmd(s))
+		cmd.AddCommand(newGhCmd(s), newGitCmd(s), newCommitCommentCmd(s))
 		return cmd
 	}
 }

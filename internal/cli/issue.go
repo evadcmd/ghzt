@@ -32,6 +32,7 @@ type (
 		Body          string     `json:"body"`
 		User          *apiUser   `json:"user"`
 		Labels        []apiLabel `json:"labels"`
+		Assignees     []apiUser  `json:"assignees"`
 		Comments      int        `json:"comments"`
 		URL           string     `json:"html_url"`
 		RepositoryURL string     `json:"repository_url"`
@@ -56,7 +57,8 @@ func newIssueCmd(s IO) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  func(c *cobra.Command, _ []string) error { return c.Help() },
 	}
-	cmd.AddCommand(newIssueViewCmd(s))
+	cmd.AddCommand(newIssueViewCmd(s), newIssueCreateCmd(s), newCommentCmd(s, "an issue"),
+		newIssueCloseCmd(s), newIssueEditCmd(s))
 	return cmd
 }
 
