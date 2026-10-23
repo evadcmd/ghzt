@@ -113,6 +113,25 @@ func TestReadFile(t *testing.T) {
 	wantErr(t, err, "larger than 4 bytes")
 }
 
+func TestSymlinkedRootTakesBothSpellings(t *testing.T) {
+	_, base, dir, _ := setup(t)
+	link := filepath.Join(base, "link")
+	symlink(t, dir, link)
+	r, err := Open(base, link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+
+	for _, name := range []string{filepath.Join(link, "sub", "body.md"), filepath.Join(dir, "sub", "body.md")} {
+		if got, err := r.ReadFile(name, 5); err != nil || string(got) != "hello" {
+			t.Errorf("ReadFile(%q) = %q, %v; want hello", name, got, err)
+		}
+	}
+	_, err = r.ReadFile(filepath.Join(base, "other.md"), 5)
+	wantErr(t, err, "outside "+link)
+}
+
 func TestReadInput(t *testing.T) {
 	r, _, _, _ := setup(t)
 	got, err := r.ReadInput("-", strings.NewReader("from stdin"), 10)
@@ -139,6 +158,13 @@ func TestWriteFile(t *testing.T) {
 	}
 	if got, err := os.ReadFile(filepath.Join(dir, "new", "deep", "out.txt")); err != nil || string(got) != "two" { //nolint:gosec // G304: a path under the test temp dir.
 		t.Errorf("file = %q, %v; want two", got, err)
+	}
+	// A shorter write replaces the whole file, not just its start.
+	if err := r.WriteFile("sub/body.md", []byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "sub", "body.md")); err != nil || string(got) != "hi" { //nolint:gosec // G304: a path under the test temp dir.
+		t.Errorf("file = %q, %v; want hi", got, err)
 	}
 
 	tests := []struct{ name, want string }{

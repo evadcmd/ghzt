@@ -67,6 +67,10 @@ func newGitCmd(s IO) *cobra.Command {
 // newRoot returns a top-level command with the settings every tree shares.
 // Usage isn't printed on errors: the caller is an agent, and a full help page
 // per mistake costs more context than the one-line hint does.
+//
+// The command is runnable, printing its help, so that cobra checks its args:
+// a command without Run returns help with a nil error before validating
+// them, and an unknown subcommand would then exit 0.
 func newRoot(use, short string, s IO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           use,
@@ -74,6 +78,8 @@ func newRoot(use, short string, s IO) *cobra.Command {
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE:          func(c *cobra.Command, _ []string) error { return c.Help() },
 	}
 	cmd.CompletionOptions.DisableDefaultCmd = true
 	cmd.SetIn(s.In)

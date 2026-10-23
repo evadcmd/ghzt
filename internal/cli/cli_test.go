@@ -47,6 +47,38 @@ func TestRunReportsFlagErrorsWithoutUsage(t *testing.T) {
 	}
 }
 
+func TestRunRejectsUnknownCommands(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"ghzt", "bogus"}, `ghzt: unknown command "bogus" for "ghzt"`},
+		{[]string{"gh", "bogus"}, `gh: unknown command "bogus" for "gh"`},
+		{[]string{"git", "bogus"}, `git: unknown command "bogus" for "git"`},
+		{[]string{"ghzt", "gh", "bogus"}, `ghzt: unknown command "bogus" for "ghzt gh"`},
+		{[]string{"ghzt", "git", "bogus"}, `ghzt: unknown command "bogus" for "ghzt git"`},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			code, stdout, stderr := run(tt.args...)
+			if code != exitError || stdout != "" || !strings.HasPrefix(stderr, tt.want) {
+				t.Errorf("got (%d, %q, %q), want (%d, \"\", %q...)", code, stdout, stderr, exitError, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunPrintsHelpWithoutArgs(t *testing.T) {
+	for _, args := range [][]string{{"ghzt"}, {"gh"}, {"ghzt", "gh"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, stdout, stderr := run(args...)
+			if code != exitOK || !strings.Contains(stdout, "Usage:") || stderr != "" {
+				t.Errorf("got (%d, %q, %q), want help on stdout and exit %d", code, stdout, stderr, exitOK)
+			}
+		})
+	}
+}
+
 func TestRunHasNoCompletionCommand(t *testing.T) {
 	code, _, stderr := run("ghzt", "completion", "bash")
 	if code != exitError || !strings.Contains(stderr, `unknown command "completion"`) {

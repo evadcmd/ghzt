@@ -27,8 +27,9 @@ const (
 // as the file itself is refused, so what is read or written is always a
 // regular file in the root.
 type Root struct {
-	dir  string
-	root *os.Root
+	dir     string // as given, for messages
+	realDir string // dir with symlinks resolved
+	root    *os.Root
 }
 
 // FromEnv opens the root named by GHZT_ROOT, read with getenv.
@@ -61,20 +62,24 @@ func Open(base, dir string) (*Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Root{dir: filepath.Clean(dir), root: root}, nil
+	return &Root{dir: filepath.Clean(dir), realDir: realDir, root: root}, nil
 }
 
 // Close releases the root's directory handle.
 func (r *Root) Close() error { return r.root.Close() }
 
 // rel returns name relative to the root. name is relative to the root
-// already, or absolute and inside it.
+// already, or absolute and inside it, spelled through the root as given or
+// with its symlinks resolved.
 func (r *Root) rel(name string) (string, error) {
 	rel := name
 	if filepath.IsAbs(name) {
-		var err error
-		if rel, err = filepath.Rel(r.dir, name); err != nil {
-			rel = ".."
+		rel = ".."
+		for _, dir := range []string{r.dir, r.realDir} {
+			if s, err := filepath.Rel(dir, name); err == nil && filepath.IsLocal(s) {
+				rel = s
+				break
+			}
 		}
 	}
 	if !filepath.IsLocal(rel) {
@@ -144,12 +149,37 @@ func (r *Root) WriteFile(name string, data []byte) error {
 		return err
 	}
 	info, err := r.root.Lstat(rel)
+	var f *os.File
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		// O_EXCL never follows a symlink, even one made since Lstat.
+		f, err = r.root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	case err != nil:
 		return err
 	case !info.Mode().IsRegular():
 		return fmt.Errorf("%s: not a regular file", name)
+	default:
+		// Truncated only once it is known to be the file Lstat saw.
+		f, err = r.root.OpenFile(rel, os.O_WRONLY, 0)
 	}
-	return r.root.WriteFile(rel, data, 0o644)
+	if err != nil {
+		return err
+	}
+	if info != nil {
+		// OpenFile follows a symlink, so make sure it is still the file
+		// Lstat saw.
+		if opened, err := f.Stat(); err != nil || !os.SameFile(info, opened) {
+			_ = f.Close()
+			return fmt.Errorf("%s: changed while being opened", name)
+		}
+		if err := f.Truncate(0); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	_, err = f.Write(data)
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	return err
 }
