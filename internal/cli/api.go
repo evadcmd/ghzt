@@ -112,6 +112,32 @@ func (c *apiClient) send(ctx context.Context, method, path string, body, v any) 
 	return nil
 }
 
+// graphql runs a GraphQL query or mutation with vars and decodes its data
+// into v. GraphQL reports most errors with a 200, in an "errors" list, so
+// those are turned into an error here.
+func (c *apiClient) graphql(ctx context.Context, query string, vars record, v any) error {
+	var resp struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := c.send(ctx, http.MethodPost, "/graphql", record{"query": query, "variables": vars}, &resp); err != nil {
+		return err
+	}
+	if len(resp.Errors) > 0 {
+		msgs := make([]string, len(resp.Errors))
+		for i, e := range resp.Errors {
+			msgs[i] = strings.ReplaceAll(e.Message, "\n", "; ")
+		}
+		return fmt.Errorf("GraphQL: %s (%s /graphql)", strings.Join(msgs, "; "), http.MethodPost)
+	}
+	if err := json.Unmarshal(resp.Data, v); err != nil {
+		return fmt.Errorf("decode response to %s /graphql: %w", http.MethodPost, err)
+	}
+	return nil
+}
+
 // do sends GET path?query and returns the response if it is a success; the
 // caller closes its body.
 func (c *apiClient) do(ctx context.Context, path string, query url.Values, accept string) (*http.Response, error) {

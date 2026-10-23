@@ -82,7 +82,7 @@ func newPRCmd(s IO) *cobra.Command {
 		RunE:  func(c *cobra.Command, _ []string) error { return c.Help() },
 	}
 	cmd.AddCommand(newPRViewCmd(s), newPRListCmd(s), newPRCreateCmd(s), newPREditCmd(s),
-		newCommentCmd(s, "a pull request"))
+		newCommentCmd(s, "a pull request"), newPRReviewCmd(s))
 	return cmd
 }
 
