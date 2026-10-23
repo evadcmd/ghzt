@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -76,6 +79,24 @@ func TestRunPrintsHelpWithoutArgs(t *testing.T) {
 				t.Errorf("got (%d, %q, %q), want help on stdout and exit %d", code, stdout, stderr, exitOK)
 			}
 		})
+	}
+}
+
+func TestRunLogsOneRecordOffTheOutput(t *testing.T) {
+	var out, errOut, logged bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&logged, nil))
+	code := Run([]string{"gh", "bogus"}, IO{In: strings.NewReader(""), Out: &out, ErrOut: &errOut, Log: log})
+
+	var rec map[string]any
+	if err := json.Unmarshal(logged.Bytes(), &rec); err != nil {
+		t.Fatalf("log = %q, want one JSON record: %v", logged.String(), err)
+	}
+	if rec["level"] != "ERROR" || rec["name"] != "gh" || rec["exit_code"] != float64(code) ||
+		!strings.Contains(fmt.Sprint(rec["error"]), "bogus") {
+		t.Errorf("record = %v", rec)
+	}
+	if strings.Contains(out.String()+errOut.String(), `"exit_code"`) {
+		t.Errorf("the record leaked into the output: stdout %q, stderr %q", out.String(), errOut.String())
 	}
 }
 

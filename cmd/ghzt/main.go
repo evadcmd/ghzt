@@ -4,11 +4,20 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/evadcmd/ghzt/internal/cli"
+	"github.com/evadcmd/ghzt/internal/telemetry"
 )
 
 func main() {
-	os.Exit(cli.Run(os.Args, cli.IO{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}))
+	os.Exit(run())
+}
+
+// run is main without the os.Exit, so that the deferred flush runs first.
+func run() int {
+	log, shutdown := telemetry.Setup(context.Background())
+	defer shutdown()
+	return cli.Run(os.Args, cli.IO{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr, Log: log})
 }

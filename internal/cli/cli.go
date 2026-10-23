@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -25,11 +26,19 @@ type IO struct {
 	In     io.Reader
 	Out    io.Writer
 	ErrOut io.Writer
+	// Log gets one record per run, for ghzt's own telemetry; nil drops it.
+	// It must not write to Out or ErrOut, which only carry what gh and git
+	// would print.
+	Log *slog.Logger
 }
 
 // Run executes the command line args (args[0] included) and returns the exit
 // code. Errors go to ErrOut, prefixed with the name the binary was run as.
 func Run(args []string, s IO) int {
+	log := s.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	name := filepath.Base(args[0])
 	cmd := newCommand(name, s)
 	cmd.SetArgs(args[1:])
@@ -38,8 +47,10 @@ func Run(args []string, s IO) int {
 		if fe, ok := errors.AsType[*flagError](err); ok {
 			_, _ = fmt.Fprintf(s.ErrOut, "Run '%s --help' for usage.\n", fe.cmdPath)
 		}
+		log.Error("run", "name", name, "args", args[1:], "exit_code", exitError, "error", err)
 		return exitError
 	}
+	log.Info("run", "name", name, "args", args[1:], "exit_code", exitOK)
 	return exitOK
 }
 
