@@ -3,7 +3,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -31,9 +30,8 @@ const (
 
 // ErrNoCredentials means the environment has neither a token nor app
 // credentials.
-var ErrNoCredentials = errors.New("no GitHub credentials: set " + EnvToken +
-	", or " + EnvAppID + ", " + EnvInstallationID + " and " + EnvPrivateKeyPath +
-	" or " + EnvPrivateKeySecret)
+var ErrNoCredentials = fmt.Errorf("no GitHub credentials: set %s, or %s, %s and %s or %s",
+	EnvToken, EnvAppID, EnvInstallationID, EnvPrivateKeyPath, EnvPrivateKeySecret)
 
 // A secretFetcher returns the value of the secret named id.
 type secretFetcher func(ctx context.Context, id string) ([]byte, error)
