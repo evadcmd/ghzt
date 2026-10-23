@@ -280,6 +280,8 @@ func TestPRViewComments(t *testing.T) {
 	}))
 	mux.Handle("GET /repos/o/r/pulls/7/reviews", reply([]any{
 		map[string]any{"id": 9, "user": map[string]any{"login": "b"}, "state": "COMMENTED", "body": "", "submitted_at": "2026-10-01T02:00:00Z"},
+		map[string]any{"id": 10, "user": map[string]any{"login": "c"}, "state": "APPROVED", "body": "", "submitted_at": "2026-10-01T03:00:00Z"},
+		map[string]any{"id": 11, "user": map[string]any{"login": "me"}, "state": "PENDING", "body": "draft"},
 	}))
 	mux.Handle("GET /repos/o/r/pulls/7/comments", reply([]any{
 		map[string]any{"id": 21, "user": map[string]any{"login": "b"}, "pull_request_review_id": 9, "path": "a.go", "line": 3, "body": "nit", "created_at": "2026-10-01T02:00:00Z"},
@@ -287,8 +289,8 @@ func TestPRViewComments(t *testing.T) {
 	s := fakeGitHub(t, mux)
 	code, stdout, stderr := runWith(s, "gh", "pr", "view", "7", "-R", "o/r", "--comments")
 	want := "kind:\tcomment\nauthor:\ta\nid:\t1\ncreated:\t2026-10-01T01:00:00Z\n--\nfirst\n--\n" +
-		"kind:\treview\nauthor:\tb\nid:\t9\nstate:\tCOMMENTED\ncreated:\t2026-10-01T02:00:00Z\n--\n\n--\n" +
-		"kind:\treview-comment\nauthor:\tb\nid:\t21\npath:\ta.go\nline:\t3\nreview:\t9\ncreated:\t2026-10-01T02:00:00Z\n--\nnit\n--\n"
+		"kind:\treview-comment\nauthor:\tb\nid:\t21\npath:\ta.go\nline:\t3\nreview:\t9\ncreated:\t2026-10-01T02:00:00Z\n--\nnit\n--\n" +
+		"kind:\treview\nauthor:\tc\nid:\t10\nstate:\tAPPROVED\ncreated:\t2026-10-01T03:00:00Z\n--\n\n--\n"
 	if code != exitOK || stdout != want {
 		t.Errorf("got (%d, %q, %q), want %q", code, stdout, stderr, want)
 	}
@@ -335,6 +337,10 @@ func TestSearch(t *testing.T) {
 	if query.Get("per_page") != "2" || query.Get("sort") != "updated" || query.Get("order") != "desc" {
 		t.Errorf("query = %v", query)
 	}
+	runWith(s, "gh", "search", "issues", "repo:o/r is:open bug", "-L", "1")
+	if got, want := query.Get("q"), `repo:o/r is:open bug is:issue`; got != want {
+		t.Errorf("query in one argument: q = %q, want %q", got, want)
+	}
 	_, stdout, _ = runWith(s, "gh", "search", "issues", "x", "-L", "1", "--json", "repository,isPullRequest")
 	if want := `[{"isPullRequest":true,"repository":{"nameWithOwner":"o/r"}}]` + "\n"; stdout != want {
 		t.Errorf("--json: got %q, want %q", stdout, want)
@@ -349,11 +355,14 @@ func TestSearchCommitsNeedsATerm(t *testing.T) {
 		reply(map[string]any{"total_count": 0, "items": []any{}})(w, r)
 	})
 	s := fakeGitHub(t, mux)
+	// The API was checked on 2026-10-23: repo:, org: and user: alone fail
+	// with 422, while author:, hash:, merge:, is: and unknown ones such as
+	// feat:login search.
 	for _, args := range [][]string{
 		{"-R", "o/r"},
-		{"repo:o/r", "author:minta"},
-		{"--", "repo:o/r", "NOT", "-author:x"},
-		{`author:"Minta Chiu"`, "repo:o/r"},
+		{"--owner", "o"},
+		{"--", "org:o", "NOT", "-repo:o/x"},
+		{"repo:o/r user:u"},
 	} {
 		code, _, stderr := runWith(s, append([]string{"gh", "search", "commits"}, args...)...)
 		if code != exitError || !strings.Contains(stderr, "query needs at least one search term") {
@@ -364,12 +373,16 @@ func TestSearchCommitsNeedsATerm(t *testing.T) {
 		{"fix", "-R", "o/r"},
 		{`"author:x is a phrase"`, "repo:o/r"},
 		{"repo:o/r", ":)"},
+		{"repo:o/r", "author:minta"},
+		{`author:"Minta Chiu"`, "repo:o/r"},
+		{"feat:login"},
+		{"repo:o/r fix"},
 	} {
 		if code, _, stderr := runWith(s, append([]string{"gh", "search", "commits"}, args...)...); code != exitOK {
 			t.Errorf("%q: got (%d, %q), want accepted", args, code, stderr)
 		}
 	}
-	if requests != 3 {
-		t.Errorf("requests = %d, want 3", requests)
+	if requests != 7 {
+		t.Errorf("requests = %d, want 7", requests)
 	}
 }

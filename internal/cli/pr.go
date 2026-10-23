@@ -408,6 +408,12 @@ func writeConversation(w io.Writer, cs []apiComment, reviews []apiReview, inline
 		}, c.Body})
 	}
 	for _, r := range reviews {
+		// A pending review is the token owner's unsubmitted draft, and a
+		// commented review without a body only wraps inline comments, which
+		// carry its id.
+		if r.State == "PENDING" || (r.State == "COMMENTED" && r.Body == "") {
+			continue
+		}
 		items = append(items, conversationItem{r.SubmittedAt, []string{
 			"kind", "review",
 			"author", loginText(r.User),

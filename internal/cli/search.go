@@ -61,7 +61,9 @@ func newSearchKindCmd[T any](s IO, spec searchSpec[T]) *cobra.Command {
 		Use:   spec.use + " [<query>]",
 		Short: spec.short,
 		Long: spec.short + ".\n\n" +
-			"The query takes GitHub's search syntax, qualifiers included.",
+			"The query takes GitHub's search syntax, qualifiers included. An argument\n" +
+			"with spaces is searched as a phrase, unless it has a qualifier: then it is\n" +
+			"passed as is, so that \"repo:owner/repo bug\" works as one argument.",
 		Args: cobra.ArbitraryArgs,
 	}
 	js := addJSONFlag(cmd, spec.fields...)
@@ -82,8 +84,11 @@ func newSearchKindCmd[T any](s IO, spec searchSpec[T]) *cobra.Command {
 		terms := make([]string, 0, len(args)+len(repos.refs)+3)
 		for _, a := range args {
 			// gh quotes an argument with spaces, so that `gh search issues
-			// "out of memory"` searches for the phrase.
-			if strings.ContainsAny(a, " \t\n") && !strings.Contains(a, `"`) {
+			// "out of memory"` searches for the phrase. Unlike gh, an
+			// argument with a qualifier is passed as is, so that a whole
+			// query in one argument, `gh search issues "repo:o/r bug"`,
+			// keeps its qualifiers.
+			if strings.ContainsAny(a, " \t\n") && !strings.Contains(a, `"`) && !hasQualifier(a) {
 				a = `"` + a + `"`
 			}
 			terms = append(terms, a)
@@ -318,24 +323,34 @@ var userSearch = searchSpec[apiUser]{
 }
 
 var (
-	qualifierRE     = regexp.MustCompile(`^-?[A-Za-z][\w-]*:\S`)
-	searchOperators = []string{"AND", "OR", "NOT"}
+	qualifierRE = regexp.MustCompile(`^-?[A-Za-z][\w-]*:\S`)
+	// scopeQualifierRE matches the qualifiers that only pick where the commit
+	// search API looks. Any other word, including qualifiers such as author:
+	// or hash: and unknown ones such as feat:, is enough for it to search.
+	scopeQualifierRE = regexp.MustCompile(`^-?(?i:repo|org|user):\S`)
+	searchOperators  = []string{"AND", "OR", "NOT"}
 )
 
-// checkCommitQuery rejects a commit query made only of qualifiers, such as
-// "repo:owner/repo": the commit search API fails on those with an unhelpful
-// validation error.
+// hasQualifier reports whether one of the whitespace-separated words of s
+// looks like a qualifier.
+func hasQualifier(s string) bool {
+	return slices.ContainsFunc(strings.Fields(s), qualifierRE.MatchString)
+}
+
+// checkCommitQuery rejects a commit query made only of repo:, org: and user:
+// qualifiers, such as "repo:owner/repo": the commit search API fails on those
+// with an unhelpful validation error.
 func checkCommitQuery(query string) error {
 	words, ok := splitWords(query)
 	if !ok {
 		words = strings.Fields(query)
 	}
 	for _, w := range words {
-		if !qualifierRE.MatchString(w) && !slices.Contains(searchOperators, w) {
+		if !scopeQualifierRE.MatchString(w) && !slices.Contains(searchOperators, w) {
 			return nil
 		}
 	}
-	return errors.New(`query needs at least one search term in addition to qualifiers, e.g. "fix repo:owner/repo" instead of "repo:owner/repo"`)
+	return errors.New(`query needs at least one search term or qualifier besides repo:, org: and user:, e.g. "fix repo:owner/repo" instead of "repo:owner/repo"`)
 }
 
 // splitWords splits s at whitespace outside double quotes, keeping the quotes,
