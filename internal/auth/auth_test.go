@@ -236,7 +236,14 @@ func TestTransportRedirect(t *testing.T) {
 	echo := func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.Header.Get("Authorization"))) //nolint:gosec // G705: echoes a header back to the test client.
 	}
-	other := httptest.NewServer(http.HandlerFunc(echo))
+	redirect := func(mux *http.ServeMux, path, to string) {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, to, http.StatusFound)
+		})
+	}
+	otherMux := http.NewServeMux()
+	otherMux.HandleFunc("/", echo)
+	other := httptest.NewServer(otherMux)
 	defer other.Close()
 	// other listens on 127.0.0.1 too; reach it as localhost to change the
 	// hostname, not just the port.
@@ -250,11 +257,15 @@ func TestTransportRedirect(t *testing.T) {
 		"/same":       api.URL + "/echo",
 		"/other-host": otherLocalhost + "/",
 		"/other-port": other.URL + "/",
+		// Once the chain has left api's host, a later hop doesn't get the
+		// token back, whether it stays on the other host or returns to api.
+		"/other-host-hop":  otherLocalhost + "/hop",
+		"/other-host-back": otherLocalhost + "/back",
 	} {
-		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, to, http.StatusFound)
-		})
+		redirect(mux, path, to)
 	}
+	redirect(otherMux, "/hop", otherLocalhost+"/")
+	redirect(otherMux, "/back", api.URL+"/echo")
 
 	client := &http.Client{Transport: &Transport{Source: staticToken("ghs_x")}}
 	for _, tt := range []struct{ path, want string }{
@@ -262,6 +273,8 @@ func TestTransportRedirect(t *testing.T) {
 		{"/same", "Bearer ghs_x"},
 		{"/other-host", ""},
 		{"/other-port", ""},
+		{"/other-host-hop", ""},
+		{"/other-host-back", ""},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
 			req, err := http.NewRequest(http.MethodGet, api.URL+tt.path, nil)
