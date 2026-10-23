@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -34,15 +34,11 @@ type apiClient struct {
 // is called when a command runs, not when the tree is built, so --help and
 // flag errors work without credentials.
 func newAPIClient(ctx context.Context, s IO) (*apiClient, error) {
-	getenv := s.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
-	}
 	transport := s.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	source, err := auth.FromEnv(ctx, getenv, transport)
+	source, err := auth.FromEnv(ctx, s.getenv, transport)
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +57,38 @@ func newAPIClient(ctx context.Context, s IO) (*apiClient, error) {
 // get decodes the JSON response to GET path?query into v and returns the
 // response headers, for the Link header pagination follows.
 func (c *apiClient) get(ctx context.Context, path string, query url.Values, v any) (http.Header, error) {
+	resp, err := c.do(ctx, path, query, "application/vnd.github+json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+		return nil, fmt.Errorf("decode response to %s %s: %w", http.MethodGet, path, err)
+	}
+	return resp.Header, nil
+}
+
+// getRaw returns the body of GET path?query, asking for accept, and its
+// headers. A body over maxBytes is an error rather than cut short.
+func (c *apiClient) getRaw(ctx context.Context, path string, query url.Values, accept string, maxBytes int64) ([]byte, http.Header, error) {
+	resp, err := c.do(ctx, path, query, accept)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read response to %s %s: %w", http.MethodGet, path, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, nil, fmt.Errorf("response to %s %s is larger than %d bytes", http.MethodGet, path, maxBytes)
+	}
+	return data, resp.Header, nil
+}
+
+// do sends GET path?query and returns the response if it is a success; the
+// caller closes its body.
+func (c *apiClient) do(ctx context.Context, path string, query url.Values, accept string) (*http.Response, error) {
 	u := apiURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -69,19 +97,16 @@ func (c *apiClient) get(ctx context.Context, path string, query url.Values, v an
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Accept", accept)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		defer func() { _ = resp.Body.Close() }()
 		return nil, apiError(resp, http.MethodGet, path)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
-		return nil, fmt.Errorf("decode response to %s %s: %w", http.MethodGet, path, err)
-	}
-	return resp.Header, nil
+	return resp, nil
 }
 
 // apiError turns an error response into one line: the status, GitHub's

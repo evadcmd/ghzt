@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -39,6 +40,13 @@ type IO struct {
 	// Transport sends the API requests; http.DefaultTransport if nil. Tests
 	// point it at an httptest server.
 	Transport http.RoundTripper
+}
+
+func (s IO) getenv(key string) string {
+	if s.Getenv == nil {
+		return os.Getenv(key)
+	}
+	return s.Getenv(key)
 }
 
 // Run executes the command line args (args[0] included) and returns the exit
@@ -102,7 +110,9 @@ func newGhCmd(s IO) *cobra.Command {
 }
 
 func newGitCmd(s IO) *cobra.Command {
-	return newRoot("git", "Read and write a GitHub repo's git data", s)
+	cmd := newRoot("git", "Read and write a GitHub repo's git data", s)
+	cmd.AddCommand(newGitShowCmd(s), newGitLsTreeCmd(s))
+	return cmd
 }
 
 // newRoot returns a top-level command with the settings every tree shares.
