@@ -8,7 +8,7 @@ import (
 )
 
 // setup makes base/user as a root with a file in it, and a secret file next
-// to base, outside every root.
+// to base, outside the root.
 func setup(t *testing.T) (r *Root, base, dir, secret string) {
 	t.Helper()
 	tmp := t.TempDir()
@@ -26,7 +26,7 @@ func setup(t *testing.T) (r *Root, base, dir, secret string) {
 			t.Fatal(err)
 		}
 	}
-	r, err := Open(base, dir)
+	r, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,31 +49,42 @@ func wantErr(t *testing.T, err error, substr string) {
 }
 
 func TestOpen(t *testing.T) {
-	_, base, dir, secret := setup(t)
-	outside := filepath.Dir(secret)
-	symlink(t, outside, filepath.Join(base, "escape"))
+	_, base, dir, _ := setup(t)
 
 	for _, d := range []string{base, dir} {
-		r, err := Open(base, d)
+		r, err := Open(d)
 		if err != nil {
 			t.Errorf("Open(%q) = %v, want ok", d, err)
 			continue
 		}
 		_ = r.Close()
 	}
-	_, err := Open(base, "workspace/user")
+	_, err := Open("workspace/user")
 	wantErr(t, err, "not an absolute path")
-	_, err = Open(base, outside)
-	wantErr(t, err, "is not inside")
-	_, err = Open(base, base+"/user/../..")
-	wantErr(t, err, "is not inside")
-	_, err = Open(base, filepath.Join(base, "escape"))
-	wantErr(t, err, "is not inside")
+	_, err = Open(filepath.Join(base, "missing"))
+	wantErr(t, err, "no such file")
 }
 
 func TestFromEnv(t *testing.T) {
-	_, err := FromEnv(func(string) string { return "" })
-	wantErr(t, err, EnvRoot+" is not set")
+	_, _, dir, _ := setup(t)
+	readBody := func(r *Root, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = r.Close() }()
+		if got, err := r.ReadFile("sub/body.md", 5); err != nil || string(got) != "hello" {
+			t.Errorf("ReadFile = %q, %v; want hello", got, err)
+		}
+	}
+
+	readBody(FromEnv(func(string) string { return dir }))
+	// Unset, it falls back to the working directory.
+	t.Chdir(dir)
+	readBody(FromEnv(func(string) string { return "" }))
+
+	_, err := FromEnv(func(string) string { return "user" })
+	wantErr(t, err, "not an absolute path")
 }
 
 func TestReadFile(t *testing.T) {
@@ -117,7 +128,7 @@ func TestSymlinkedRootTakesBothSpellings(t *testing.T) {
 	_, base, dir, _ := setup(t)
 	link := filepath.Join(base, "link")
 	symlink(t, dir, link)
-	r, err := Open(base, link)
+	r, err := Open(link)
 	if err != nil {
 		t.Fatal(err)
 	}

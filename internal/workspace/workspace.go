@@ -1,9 +1,10 @@
 // Package workspace confines the files ghzt reads and writes (--body-file,
-// -o, commit paths) to one directory, GHZT_ROOT, inside /workspace.
+// -o, commit paths) to one directory, GHZT_ROOT, or the working directory if
+// it is unset.
 //
-// GHZT_ROOT is where the caller's files live: /workspace today, and
-// /workspace/<user_id> once each user gets their own directory. Commands take
-// paths relative to it, or absolute paths inside it.
+// Where the root may be is up to whoever runs ghzt: taruza, for one, sets
+// GHZT_ROOT to its own workspace directory. Commands take paths relative to
+// the root, or absolute paths inside it.
 package workspace
 
 import (
@@ -15,12 +16,8 @@ import (
 	"path/filepath"
 )
 
-const (
-	// Base is the directory every root has to be in.
-	Base = "/workspace"
-	// EnvRoot names the root directory.
-	EnvRoot = "GHZT_ROOT"
-)
+// EnvRoot names the root directory.
+const EnvRoot = "GHZT_ROOT"
 
 // Root is a directory files are read from and written to. Nothing outside
 // it can be reached, through ".." or symlinks alike (os.Root), and a symlink
@@ -32,31 +29,28 @@ type Root struct {
 	root    *os.Root
 }
 
-// FromEnv opens the root named by GHZT_ROOT, read with getenv.
+// FromEnv opens the root named by GHZT_ROOT, read with getenv, or the
+// working directory if it is unset.
 func FromEnv(getenv func(string) string) (*Root, error) {
 	dir := getenv(EnvRoot)
 	if dir == "" {
-		return nil, fmt.Errorf("%s is not set", EnvRoot)
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		dir = wd
 	}
-	return Open(Base, dir)
+	return Open(dir)
 }
 
-// Open opens dir as a root. dir must be absolute and, with symlinks
-// resolved, be base or inside it.
-func Open(base, dir string) (*Root, error) {
+// Open opens dir as a root. dir must be absolute.
+func Open(dir string) (*Root, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, fmt.Errorf("root %q is not an absolute path", dir)
-	}
-	realBase, err := filepath.EvalSymlinks(base)
-	if err != nil {
-		return nil, err
 	}
 	realDir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return nil, err
-	}
-	if rel, err := filepath.Rel(realBase, realDir); err != nil || !filepath.IsLocal(rel) {
-		return nil, fmt.Errorf("root %q is not inside %s", dir, base)
 	}
 	root, err := os.OpenRoot(realDir)
 	if err != nil {
