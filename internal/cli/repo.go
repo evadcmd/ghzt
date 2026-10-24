@@ -14,7 +14,7 @@ import (
 var (
 	ownerRE    = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$`)
 	repoNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-	branchRE   = regexp.MustCompile(`^[^\s~^:?*\[\\]+$`)
+	branchRE   = regexp.MustCompile(`^[^\s\x00-\x1f\x7f~^:?*\[\\]+$`)
 )
 
 const (
