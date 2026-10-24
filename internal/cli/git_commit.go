@@ -20,8 +20,8 @@ const (
 	maxCommitFiles = 100
 	// maxMessageBytes is the longest commit message -F reads.
 	maxMessageBytes = 1 << 20
-	// maxBlobBytes is the largest file git commit uploads: GitHub refuses a
-	// file over 100 MiB.
+	// maxBlobBytes is the largest file git commit uploads: GitHub blocks a
+	// file over 100 MiB in a push, and the API is assumed to do the same.
 	maxBlobBytes = 100 << 20
 )
 
