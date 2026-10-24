@@ -69,8 +69,8 @@ ghzt signs a JWT with the key and exchanges it for an installation token.
 ### Other environment
 
 - `GHZT_ROOT`: the directory local files (`--body-file`, `--comments-file`,
-  `-o`, the files `git commit` commits) are confined to. Defaults to the working directory. Paths are relative
-  to it, or absolute inside it.
+  `-o`, the files `git commit` commits) are confined to. Defaults to the
+  working directory. Paths are relative to it, or absolute inside it.
 - `GH_DEBUG=api`: log every request and response to stderr, as gh does.
 - Telemetry stays off unless an OTLP endpoint is set
   (`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`).
