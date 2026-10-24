@@ -85,30 +85,41 @@ func (r *Root) rel(name string) (string, error) {
 // ReadFile reads the regular file name, failing if it is larger than max
 // bytes.
 func (r *Root) ReadFile(name string, maxBytes int64) ([]byte, error) {
+	data, _, err := r.ReadFileMode(name, maxBytes)
+	return data, err
+}
+
+// ReadFileMode is ReadFile that also returns the file's mode, for its
+// executable bit.
+func (r *Root) ReadFileMode(name string, maxBytes int64) ([]byte, fs.FileMode, error) {
 	rel, err := r.rel(name)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	info, err := r.root.Lstat(rel)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s: not a regular file", name)
+		return nil, 0, fmt.Errorf("%s: not a regular file", name)
 	}
 	if info.Size() > maxBytes {
-		return nil, fmt.Errorf("%s: larger than %d bytes", name, maxBytes)
+		return nil, 0, fmt.Errorf("%s: larger than %d bytes", name, maxBytes)
 	}
 	f, err := r.root.Open(rel)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = f.Close() }()
 	// Open follows a symlink, so make sure it is still the file Lstat saw.
 	if opened, err := f.Stat(); err != nil || !os.SameFile(info, opened) {
-		return nil, fmt.Errorf("%s: changed while being opened", name)
+		return nil, 0, fmt.Errorf("%s: changed while being opened", name)
 	}
-	return readLimited(name, f, maxBytes)
+	data, err := readLimited(name, f, maxBytes)
+	if err != nil {
+		return nil, 0, err
+	}
+	return data, info.Mode(), nil
 }
 
 // ReadInput reads name like ReadFile, or standard input from stdin if name

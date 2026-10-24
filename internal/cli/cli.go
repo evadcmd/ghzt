@@ -112,7 +112,7 @@ func newGhCmd(s IO) *cobra.Command {
 
 func newGitCmd(s IO) *cobra.Command {
 	cmd := newRoot("git", "Read and write a GitHub repo's git data", s)
-	cmd.AddCommand(newGitShowCmd(s), newGitLsTreeCmd(s), newGitBranchCmd(s))
+	cmd.AddCommand(newGitShowCmd(s), newGitLsTreeCmd(s), newGitBranchCmd(s), newGitCommitCmd(s))
 	return cmd
 }
 
