@@ -124,6 +124,26 @@ func TestReadFile(t *testing.T) {
 	wantErr(t, err, "larger than 4 bytes")
 }
 
+func TestReadFileMode(t *testing.T) {
+	r, _, dir, secret := setup(t)
+	symlink(t, secret, filepath.Join(dir, "link.pem"))
+	run := filepath.Join(dir, "run.sh")
+	if err := os.WriteFile(run, []byte("#!/bin/sh"), 0o700); err != nil { //nolint:gosec // G306: the test needs an executable file.
+		t.Fatal(err)
+	}
+
+	for name, exec := range map[string]bool{"sub/body.md": false, "run.sh": true} {
+		data, mode, err := r.ReadFileMode(name, 100)
+		if err != nil || len(data) == 0 || !mode.IsRegular() || (mode&0o100 != 0) != exec {
+			t.Errorf("ReadFileMode(%q) = %q, %v, %v; want executable %v", name, data, mode, err, exec)
+		}
+	}
+	_, _, err := r.ReadFileMode("link.pem", 100)
+	wantErr(t, err, "not a regular file")
+	_, _, err = r.ReadFileMode("run.sh", 4)
+	wantErr(t, err, "larger than 4 bytes")
+}
+
 func TestSymlinkedRootTakesBothSpellings(t *testing.T) {
 	_, base, dir, _ := setup(t)
 	link := filepath.Join(base, "link")

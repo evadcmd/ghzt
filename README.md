@@ -69,8 +69,8 @@ ghzt signs a JWT with the key and exchanges it for an installation token.
 ### Other environment
 
 - `GHZT_ROOT`: the directory local files (`--body-file`, `--comments-file`,
-  `-o`) are confined to. Defaults to the working directory. Paths are relative
-  to it, or absolute inside it.
+  `-o`, the files `git commit` commits) are confined to. Defaults to the
+  working directory. Paths are relative to it, or absolute inside it.
 - `GH_DEBUG=api`: log every request and response to stderr, as gh does.
 - Telemetry stays off unless an OTLP endpoint is set
   (`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`).
@@ -96,6 +96,7 @@ bin/ghzt gh issue comment <n> -R evadcmd/ghzt -b "test"
 bin/ghzt gh issue close <n> -R evadcmd/ghzt --reason not_planned
 bin/ghzt git branch tmp-test -R evadcmd/ghzt         # from the default branch
 bin/ghzt git branch tmp-test main -R evadcmd/ghzt    # again: HTTP 422
+bin/ghzt git commit -R evadcmd/ghzt --branch tmp-test -m "test" README.md
 ```
 
 ghzt can't delete branches; remove a test branch on the web or with the real
