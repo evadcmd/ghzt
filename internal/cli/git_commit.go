@@ -20,6 +20,9 @@ const (
 	maxCommitFiles = 100
 	// maxMessageBytes is the longest commit message -F reads.
 	maxMessageBytes = 1 << 20
+	// maxBlobBytes is the largest file git commit uploads: GitHub refuses a
+	// file over 100 MiB.
+	maxBlobBytes = 100 << 20
 )
 
 // cleanMessage tidies a commit message the way git commit does by default
@@ -153,7 +156,9 @@ commit's URL.`,
 		if err != nil {
 			return err
 		}
-		subject, _, _ := strings.Cut(msg, "\n")
+		// Like git's %s: the first paragraph, its lines joined by spaces.
+		para, _, _ := strings.Cut(strings.TrimSuffix(msg, "\n"), "\n\n")
+		subject := strings.ReplaceAll(para, "\n", " ")
 		_, err = fmt.Fprintf(s.Out, "[%s %s] %s\n %d %s changed\n", branch, sha[:7], subject, len(paths), plural(len(paths), "file"))
 		if err != nil {
 			return err
@@ -165,8 +170,13 @@ commit's URL.`,
 
 // commitFiles commits paths, read from root, to branch with msg through the
 // git database API, and returns the new commit's SHA. Files are read and
-// uploaded one at a time, so only one is in memory; if one fails, the blobs
-// already uploaded are left unreferenced, which changes nothing in the repo.
+// uploaded one at a time, so only one is in memory, held about three times
+// over (raw, base64 and the request body); if one fails, the blobs already
+// uploaded are left unreferenced, which changes nothing in the repo.
+//
+// Every SHA a response returns is checked before it goes into the next
+// request: an empty base_tree would make a tree of only these files, and the
+// commit would delete everything else.
 func commitFiles(ctx context.Context, api *apiClient, repo repoRef, branch string, root *workspace.Root, paths []string, msg string) (string, error) {
 	var ref apiGitRef
 	if _, err := api.get(ctx, repo.path(withSegments(branch, "git", "ref", "heads")...), nil, &ref); err != nil {
@@ -184,9 +194,12 @@ func commitFiles(ctx context.Context, api *apiClient, repo repoRef, branch strin
 	if _, err := api.get(ctx, repo.path("git", "commits", parent), nil, &head); err != nil {
 		return "", err
 	}
+	if !fullSHARE.MatchString(head.Tree.SHA) {
+		return "", fmt.Errorf("unexpected response reading commit %s: tree %q", parent, head.Tree.SHA)
+	}
 	entries := make([]record, len(paths))
 	for i, p := range paths {
-		data, mode, err := root.ReadFileMode(p, maxFileBytes)
+		data, mode, err := root.ReadFileMode(p, maxBlobBytes)
 		if err != nil {
 			return "", err
 		}
@@ -194,6 +207,9 @@ func commitFiles(ctx context.Context, api *apiClient, repo repoRef, branch strin
 		body := record{"content": base64.StdEncoding.EncodeToString(data), "encoding": "base64"}
 		if err := api.send(ctx, http.MethodPost, repo.path("git", "blobs"), body, &blob); err != nil {
 			return "", fmt.Errorf("%s: %w", p, err)
+		}
+		if !fullSHARE.MatchString(blob.SHA) {
+			return "", fmt.Errorf("%s: unexpected response creating the blob: %q", p, blob.SHA)
 		}
 		fileMode := "100644"
 		if mode&0o100 != 0 {
@@ -204,6 +220,9 @@ func commitFiles(ctx context.Context, api *apiClient, repo repoRef, branch strin
 	var tree apiSHA
 	if err := api.send(ctx, http.MethodPost, repo.path("git", "trees"), record{"base_tree": head.Tree.SHA, "tree": entries}, &tree); err != nil {
 		return "", err
+	}
+	if !fullSHARE.MatchString(tree.SHA) {
+		return "", fmt.Errorf("unexpected response creating the tree: %q", tree.SHA)
 	}
 	var commit apiSHA
 	body := record{"message": msg, "tree": tree.SHA, "parents": []string{parent}}

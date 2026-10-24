@@ -17,7 +17,7 @@ const (
 )
 
 // commitServer serves a repo whose branch main is at testSHA, recording the
-// requests in got. Blob n gets the SHA "blob<n>".
+// requests in got. Blob n gets the SHA blobSHA(n).
 func commitServer(t *testing.T, got *[]request) *http.ServeMux {
 	t.Helper()
 	blobs := 0
@@ -30,7 +30,7 @@ func commitServer(t *testing.T, got *[]request) *http.ServeMux {
 	}))
 	mux.HandleFunc("POST /repos/o/r/git/blobs", func(w http.ResponseWriter, r *http.Request) {
 		blobs++
-		recorder(t, got, map[string]any{"sha": fmt.Sprint("blob", blobs)})(w, r)
+		recorder(t, got, map[string]any{"sha": blobSHA(blobs)})(w, r)
 	})
 	mux.Handle("POST /repos/o/r/git/trees", recorder(t, got, map[string]any{"sha": newTree}))
 	mux.Handle("POST /repos/o/r/git/commits", recorder(t, got, map[string]any{"sha": commitSHA}))
@@ -53,6 +53,8 @@ func writeFiles(t *testing.T, root string, files map[string]string) {
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
+func blobSHA(n int) string { return fmt.Sprintf("b%039x", n) }
+
 func TestGitCommit(t *testing.T) {
 	var got []request
 	s := fakeGitHub(t, commitServer(t, &got))
@@ -74,8 +76,8 @@ func TestGitCommit(t *testing.T) {
 		{http.MethodPost, "/repos/o/r/git/blobs", map[string]any{"content": b64("hi\n"), "encoding": "base64"}},
 		{http.MethodPost, "/repos/o/r/git/blobs", map[string]any{"content": b64("#!/bin/sh\n"), "encoding": "base64"}},
 		{http.MethodPost, "/repos/o/r/git/trees", map[string]any{"base_tree": treeSHA, "tree": []any{
-			map[string]any{"path": "README.md", "mode": "100644", "type": "blob", "sha": "blob1"},
-			map[string]any{"path": "scripts/run.sh", "mode": "100755", "type": "blob", "sha": "blob2"},
+			map[string]any{"path": "README.md", "mode": "100644", "type": "blob", "sha": blobSHA(1)},
+			map[string]any{"path": "scripts/run.sh", "mode": "100755", "type": "blob", "sha": blobSHA(2)},
 		}}},
 		{http.MethodPost, "/repos/o/r/git/commits", map[string]any{
 			"message": "Add things\n\nMore detail.\nSecond line.\n", "tree": newTree, "parents": []any{testSHA},
@@ -117,6 +119,13 @@ func TestGitCommitMessageFile(t *testing.T) {
 	code, out, errOut = runWith(s, "git", "commit", "-R", "o/r", "--branch", "main", "-F", "-", "a.txt")
 	if code != exitOK || !strings.HasPrefix(out, "[main abcdef0] From stdin\n") || errOut != "" {
 		t.Fatalf("stdin: got (%d, %q, %q)", code, out, errOut)
+	}
+
+	// Like git, the subject is the whole first paragraph.
+	s.In = strings.NewReader("Wrapped\nsubject\n\nBody\n")
+	code, out, errOut = runWith(s, "git", "commit", "-R", "o/r", "--branch", "main", "-F", "-", "a.txt")
+	if code != exitOK || !strings.HasPrefix(out, "[main abcdef0] Wrapped subject\n") || errOut != "" {
+		t.Fatalf("paragraph: got (%d, %q, %q)", code, out, errOut)
 	}
 }
 
@@ -209,6 +218,33 @@ func TestGitCommitAPIErrors(t *testing.T) {
 		code, out, errOut := runWith(s, "git", "commit", "-R", "o/r", "--branch", branch, "-m", "x", "a.txt")
 		if code != 1 || out != "" || !strings.Contains(errOut, want) {
 			t.Errorf("%s: got (%d, %q, %q), want %q", branch, code, out, errOut, want)
+		}
+	}
+}
+
+func TestGitCommitBadSHA(t *testing.T) {
+	for path, want := range map[string]string{
+		"GET /repos/o/r/git/commits/": `unexpected response reading commit ` + testSHA + `: tree ""`,
+		"POST /repos/o/r/git/blobs":   `a.txt: unexpected response creating the blob: ""`,
+		"POST /repos/o/r/git/trees":   `unexpected response creating the tree: ""`,
+	} {
+		var got []request
+		mux := http.NewServeMux()
+		// The more specific pattern wins: this response has no SHA.
+		mux.Handle(path, reply(map[string]any{}))
+		mux.Handle("/", commitServer(t, &got))
+		s := fakeGitHub(t, mux)
+		root := withRoot(t, &s)
+		writeFiles(t, root, map[string]string{"a.txt": "a"})
+
+		code, out, errOut := runWith(s, "git", "commit", "-R", "o/r", "--branch", "main", "-m", "x", "a.txt")
+		if code != 1 || out != "" || !strings.Contains(errOut, want) {
+			t.Errorf("%s: got (%d, %q, %q), want %q", path, code, out, errOut, want)
+		}
+		for _, r := range got {
+			if r.Method == http.MethodPatch {
+				t.Errorf("%s: moved the branch", path)
+			}
 		}
 	}
 }
