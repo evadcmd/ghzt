@@ -58,7 +58,7 @@ func TestGitCommit(t *testing.T) {
 	s := fakeGitHub(t, commitServer(t, &got))
 	root := withRoot(t, &s)
 	writeFiles(t, root, map[string]string{"README.md": "hi\n", "scripts/run.sh": "#!/bin/sh\n"})
-	if err := os.Chmod(filepath.Join(root, "scripts", "run.sh"), 0o700); err != nil {
+	if err := os.Chmod(filepath.Join(root, "scripts", "run.sh"), 0o700); err != nil { //nolint:gosec // G302: the test needs an executable file.
 		t.Fatal(err)
 	}
 
