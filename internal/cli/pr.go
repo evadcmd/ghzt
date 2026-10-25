@@ -356,7 +356,8 @@ func pullFiles(ctx context.Context, api *apiClient, repo repoRef, number int) ([
 }
 
 // changeType is gh's changeType for the API's file status: the same word in
-// capitals, except that the API's "removed" is gh's "DELETED".
+// capitals, except that the API's "removed" is gh's "DELETED". The API's
+// "unchanged" has no gh value and passes through as "UNCHANGED".
 func changeType(status string) string {
 	if status == "removed" {
 		return "DELETED"

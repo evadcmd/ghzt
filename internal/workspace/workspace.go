@@ -161,7 +161,7 @@ func (r *Root) WriteFile(name string, data []byte) error {
 		return err
 	}
 	if err := r.root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
-		return err
+		return pathError(name, err)
 	}
 	info, err := r.root.Lstat(rel)
 	var f *os.File
@@ -170,7 +170,7 @@ func (r *Root) WriteFile(name string, data []byte) error {
 		// O_EXCL never follows a symlink, even one made since Lstat.
 		f, err = r.root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	case err != nil:
-		return err
+		return pathError(name, err)
 	case !info.Mode().IsRegular():
 		return fmt.Errorf("%s: not a regular file", name)
 	default:
@@ -178,7 +178,7 @@ func (r *Root) WriteFile(name string, data []byte) error {
 		f, err = r.root.OpenFile(rel, os.O_WRONLY, 0)
 	}
 	if err != nil {
-		return err
+		return pathError(name, err)
 	}
 	if info != nil {
 		// OpenFile follows a symlink, so make sure it is still the file

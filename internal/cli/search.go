@@ -318,8 +318,8 @@ var codeSearch = searchSpec[apiCode]{
 	row: func(c apiCode) []string { return []string{c.Repository.FullName, c.Path} },
 	note: "Results come from the REST API's code search index, which some repos are\n" +
 		"missing from: a repo GitHub hasn't indexed returns nothing for any query.\n" +
-		"So no results, noted on stderr as \"no results found\", doesn't mean the code\n" +
-		"isn't there. To read a repo's code, clone it instead.",
+		"So no results (\"no results found\" on stderr, or [] with --json) doesn't\n" +
+		"mean the code isn't there. To read a repo's code, clone it instead.",
 }
 
 var userSearch = searchSpec[apiUser]{
