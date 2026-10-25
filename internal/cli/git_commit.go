@@ -383,7 +383,7 @@ func moveBranch(ctx context.Context, api *apiClient, repo repoRef, branch, commi
 	if !strings.HasPrefix(err.Error(), "HTTP 4") {
 		var ref apiGitRef
 		if _, rerr := api.get(ctx, repo.path(withSegments(branch, "git", "ref", "heads")...), nil, &ref); rerr != nil {
-			return fmt.Errorf("%w; commit %s was made, and reading %s back failed too (%v), so it may or may not have been moved to it: check with git log", err, commit, branch, rerr)
+			return fmt.Errorf("%w; commit %s was made, and reading %s back failed too (%w), so it may or may not have been moved to it: check with git log", err, commit, branch, rerr)
 		}
 		if ref.Object.SHA == commit {
 			return nil
