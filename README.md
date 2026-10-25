@@ -25,8 +25,9 @@ learns the few places ghzt differs from each command's `--help`.
   write through a read prefix. The split only protects as much as the host's
   rules enforce it.
 - **Output sized for a model.** Short human-readable text by default,
-  gh-style `--json` where gh has it, one-line errors with a non-zero exit, and
-  an explicit `… truncated, N more` marker instead of silently cut output.
+  gh-style `--json` where gh has it, one-line errors with a non-zero exit, an
+  explicit `… truncated, N more` marker instead of silently cut output, and a
+  `no … found` note on stderr instead of silently empty output.
 
 The design and roadmap live in
 [#3](https://github.com/evadcmd/ghzt/issues/3).

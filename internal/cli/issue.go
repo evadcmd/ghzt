@@ -102,7 +102,13 @@ func newIssueViewCmd(s IO) *cobra.Command {
 			r["comments"] = commentRecords(cs)
 			return js.writeRecord(s.Out, r)
 		}
-		return writeIssue(s.Out, issue, cs, comments)
+		if err := writeIssue(s.Out, issue, cs, comments); err != nil {
+			return err
+		}
+		if comments {
+			writeNoResults(s.ErrOut, len(cs), "comments")
+		}
+		return nil
 	}
 	return cmd
 }

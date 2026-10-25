@@ -156,6 +156,7 @@ func newSearchKindCmd[T any](s IO, spec searchSpec[T]) *cobra.Command {
 			if err := writeRows(s.Out, rows); err != nil {
 				return err
 			}
+			writeNoResults(s.ErrOut, len(rows), "results")
 		}
 		writeListTruncated(s.ErrOut, len(items), min(total, maxSearchResults))
 		return nil

@@ -116,6 +116,7 @@ func newLabelListCmd(s IO) *cobra.Command {
 			if err := writeRows(s.Out, rows); err != nil {
 				return err
 			}
+			writeNoResults(s.ErrOut, len(rows), "labels")
 		}
 		writeMoreLeft(s.ErrOut, more)
 		return nil
