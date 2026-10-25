@@ -98,7 +98,7 @@ func (r *Root) ReadFileMode(name string, maxBytes int64) ([]byte, fs.FileMode, e
 	}
 	info, err := r.root.Lstat(rel)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, pathError(name, err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, 0, fmt.Errorf("%s: not a regular file", name)
@@ -108,7 +108,7 @@ func (r *Root) ReadFileMode(name string, maxBytes int64) ([]byte, fs.FileMode, e
 	}
 	f, err := r.root.Open(rel)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, pathError(name, err)
 	}
 	defer func() { _ = f.Close() }()
 	// Open follows a symlink, so make sure it is still the file Lstat saw.
@@ -120,6 +120,16 @@ func (r *Root) ReadFileMode(name string, maxBytes int64) ([]byte, fs.FileMode, e
 		return nil, 0, err
 	}
 	return data, info.Mode(), nil
+}
+
+// pathError names the file in err as the caller did. os.Root reports the
+// path relative to the root, after the syscall, such as "statat x: no such
+// file or directory", which isn't the path the caller gave.
+func pathError(name string, err error) error {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		return fmt.Errorf("%s: %w", name, pe.Err)
+	}
+	return err
 }
 
 // ReadInput reads name like ReadFile, or standard input from stdin if name

@@ -60,13 +60,19 @@ func Run(args []string, s IO) int {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	name := filepath.Base(args[0])
+	invokedAs := filepath.Base(args[0])
+	name := invokedAs
+	// ghzt gh and ghzt git run as gh and git do, so that usage lines, help
+	// and errors name the command the caller would type, gh or git.
+	if name != "gh" && name != "git" && len(args) > 1 && (args[1] == "gh" || args[1] == "git") {
+		name, args = args[1], args[1:]
+	}
 	cmd := newCommand(name, s)
 	cmd.SetArgs(args[1:])
 	start := time.Now()
 	ran, err := cmd.ExecuteC()
 	attrs := []any{
-		"name", name,
+		"name", invokedAs,
 		"command", ran.CommandPath(),
 		"flags", setFlags(ran),
 		"duration_ms", time.Since(start).Milliseconds(),
@@ -138,6 +144,13 @@ func newRoot(use, short string, s IO) *cobra.Command {
 	cmd.SetOut(s.Out)
 	cmd.SetErr(s.ErrOut)
 	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		// cobra parses flags on the last command it found, so an unknown
+		// subcommand followed by a flag, as in gh repo view -R o/r, fails on
+		// the flag; the subcommand is what is wrong. pflag has kept the
+		// positional args before the bad flag, the subcommand first.
+		if c.HasSubCommands() && c.Flags().NArg() > 0 {
+			err = fmt.Errorf("unknown command %q for %q", c.Flags().Arg(0), c.CommandPath())
+		}
 		return &flagError{err: err, cmdPath: c.CommandPath()}
 	})
 	return cmd

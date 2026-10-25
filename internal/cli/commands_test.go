@@ -240,8 +240,12 @@ func TestPRViewJSON(t *testing.T) {
 		map[string]any{"id": 21, "pull_request_review_id": 9, "path": "a.go", "line": 3, "body": "nit", "created_at": "2026-10-01T02:00:00Z"},
 		map[string]any{"id": 22, "in_reply_to_id": 21, "pull_request_review_id": 10, "path": "a.go", "line": 3, "body": "ok", "created_at": "2026-10-01T03:00:00Z"},
 	}))
+	mux.Handle("GET /repos/o/r/pulls/7/files", reply([]any{
+		map[string]any{"filename": "a.go", "status": "modified", "additions": 3, "deletions": 1},
+		map[string]any{"filename": "old.go", "status": "removed", "additions": 0, "deletions": 9},
+	}))
 	s := fakeGitHub(t, mux)
-	code, stdout, stderr := runWith(s, "gh", "pr", "view", "7", "-R", "o/r", "--json", "mergeable,commits,reviewComments,state")
+	code, stdout, stderr := runWith(s, "gh", "pr", "view", "7", "-R", "o/r", "--json", "mergeable,commits,reviewComments,state,files")
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -258,7 +262,15 @@ func TestPRViewJSON(t *testing.T) {
 			PullRequestReviewID int64
 			Line                int
 		}
+		Files []struct {
+			Path                 string
+			Additions, Deletions int
+			ChangeType           string
+		}
 	}](t, stdout)
+	if want := "[{a.go 3 1 MODIFIED} {old.go 0 9 DELETED}]"; fmt.Sprint(got.Files) != want {
+		t.Errorf("files = %v, want %s", got.Files, want)
+	}
 	if got.State != "OPEN" || got.Mergeable != "UNKNOWN" {
 		t.Errorf("state, mergeable = %q, %q", got.State, got.Mergeable)
 	}
@@ -395,6 +407,25 @@ func TestSearch(t *testing.T) {
 	_, stdout, _ = runWith(s, "gh", "search", "issues", "x", "-L", "1", "--json", "repository,isPullRequest")
 	if want := `[{"isPullRequest":true,"repository":{"nameWithOwner":"o/r"}}]` + "\n"; stdout != want {
 		t.Errorf("--json: got %q, want %q", stdout, want)
+	}
+}
+
+func TestSearchRepos(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.Handle("GET /search/repositories", reply(map[string]any{"total_count": 1, "items": []any{
+		map[string]any{"full_name": "o/r", "fork": true},
+	}}))
+	s := fakeGitHub(t, mux)
+	_, stdout, stderr := runWith(s, "gh", "search", "repos", "x", "--json", "fullName,isFork")
+	if want := `[{"fullName":"o/r","isFork":true}]` + "\n"; stdout != want {
+		t.Errorf("got (%q, %q), want %q", stdout, stderr, want)
+	}
+}
+
+func TestSearchCodeHelpNotesTheIndex(t *testing.T) {
+	_, stdout, _ := run("gh", "search", "code", "--help")
+	if !strings.Contains(stdout, "code search index") {
+		t.Errorf("help = %q, want the note on the index", stdout)
 	}
 }
 

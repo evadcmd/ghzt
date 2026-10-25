@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,6 +124,14 @@ func TestReadFile(t *testing.T) {
 
 	_, err := r.ReadFile("sub/body.md", 4)
 	wantErr(t, err, "larger than 4 bytes")
+
+	// A missing file is named as the caller gave it, not by os.Root's
+	// syscall and relative path, and is still fs.ErrNotExist.
+	name := filepath.Join(dir, "sub", "missing.md")
+	_, err = r.ReadFile(name, 100)
+	if want := name + ": no such file or directory"; err == nil || err.Error() != want || !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("err = %v, want %q and fs.ErrNotExist", err, want)
+	}
 }
 
 func TestReadFileMode(t *testing.T) {

@@ -106,6 +106,16 @@ func newIssueCloseCmd(s IO) *cobra.Command {
 			return err
 		}
 		n := strconv.Itoa(number)
+		// An issue that is already closed is left alone, comment included,
+		// as in gh: closing it again would only change its state reason.
+		var current apiIssue
+		if _, err := api.get(ctx, repo.ref.path("issues", n), nil, &current); err != nil {
+			return err
+		}
+		if current.State == "closed" {
+			_, err := fmt.Fprintf(s.ErrOut, "! Issue %s#%d (%s) is already closed\n", repo.ref, number, current.Title)
+			return err
+		}
 		// The comment goes first, as in gh, so that it reads as the reason
 		// above the close event.
 		if comment != "" {

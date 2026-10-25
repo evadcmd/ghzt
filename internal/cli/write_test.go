@@ -120,6 +120,7 @@ func TestBodyFile(t *testing.T) {
 		want string
 	}{
 		{[]string{"-F", "../outside.md"}, "outside.md"},
+		{[]string{"-F", "missing.md"}, "gh: missing.md: no such file or directory\n"},
 		{[]string{"-b", "x", "-F", "body.md"}, "none of the others can be"},
 		{nil, "--body or --body-file required"},
 		{[]string{"-b", ""}, "body cannot be blank"},
@@ -139,6 +140,7 @@ func TestBodyFile(t *testing.T) {
 func TestIssueClose(t *testing.T) {
 	var got []request
 	mux := http.NewServeMux()
+	mux.Handle("GET /repos/o/r/issues/3", reply(map[string]any{"number": 3, "state": "open"}))
 	mux.Handle("POST /repos/o/r/issues/3/comments", recorder(t, &got, map[string]any{"id": 1}))
 	mux.Handle("PATCH /repos/o/r/issues/3", recorder(t, &got, issueURL))
 	s := fakeGitHub(t, mux)
@@ -159,6 +161,25 @@ func TestIssueClose(t *testing.T) {
 	code, _, errOut = runWith(s, "gh", "issue", "close", "3", "-R", "o/r", "-r", "wontfix")
 	if code != 1 || !strings.Contains(errOut, "not planned") {
 		t.Errorf("bad reason: code %d, stderr %q", code, errOut)
+	}
+}
+
+// An issue that is already closed is left as it is, comment included, and
+// that is not an error, as in gh.
+func TestIssueCloseAlreadyClosed(t *testing.T) {
+	var got []request
+	mux := http.NewServeMux()
+	mux.Handle("GET /repos/o/r/issues/3", reply(map[string]any{"number": 3, "title": "Old", "state": "closed"}))
+	mux.Handle("POST /repos/o/r/issues/3/comments", recorder(t, &got, map[string]any{"id": 1}))
+	mux.Handle("PATCH /repos/o/r/issues/3", recorder(t, &got, issueURL))
+	s := fakeGitHub(t, mux)
+
+	code, out, errOut := runWith(s, "gh", "issue", "close", "3", "-R", "o/r", "-c", "again")
+	if code != exitOK || out != "" || errOut != "! Issue o/r#3 (Old) is already closed\n" {
+		t.Errorf("got (%d, %q, %q)", code, out, errOut)
+	}
+	if len(got) != 0 {
+		t.Errorf("sent %d writes, want none", len(got))
 	}
 }
 
@@ -334,6 +355,20 @@ func TestLabelCreate(t *testing.T) {
 	code, _, errOut = runWith(s, "gh", "label", "create", "x", "-R", "o/r", "-c", "red")
 	if code != 1 || !strings.Contains(errOut, `invalid color "red"`) {
 		t.Errorf("bad color: code %d, stderr %q", code, errOut)
+	}
+}
+
+func TestLabelCreateExisting(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.Handle("POST /repos/o/r/labels", apiReply(http.StatusUnprocessableEntity, map[string]any{
+		"message": "Validation Failed",
+		"errors":  []any{map[string]any{"resource": "Label", "code": "already_exists", "field": "name"}},
+	}))
+	s := fakeGitHub(t, mux)
+	code, out, errOut := runWith(s, "gh", "label", "create", "bug", "-R", "o/r")
+	want := `gh: label with name "bug" already exists; updating it (gh's --force) isn't supported` + "\n"
+	if code != exitError || out != "" || errOut != want {
+		t.Errorf("got (%d, %q, %q), want (1, \"\", %q)", code, out, errOut, want)
 	}
 }
 
