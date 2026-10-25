@@ -3,8 +3,11 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -37,9 +40,6 @@ func newIssueCreateCmd(s IO) *cobra.Command {
 			}
 			fields["body"] = text
 		}
-		if len(labels) > 0 {
-			fields["labels"] = labels
-		}
 		if len(assignees) > 0 {
 			fields["assignees"] = assignees
 		}
@@ -47,6 +47,13 @@ func newIssueCreateCmd(s IO) *cobra.Command {
 		api, err := newAPIClient(ctx, s)
 		if err != nil {
 			return err
+		}
+		if len(labels) > 0 {
+			names, err := resolveLabels(ctx, api, repo.ref, labels)
+			if err != nil {
+				return err
+			}
+			fields["labels"] = names
 		}
 		var issue apiIssue
 		if err := api.send(ctx, http.MethodPost, repo.ref.path("issues"), fields, &issue); err != nil {
@@ -198,11 +205,16 @@ func (e issueSetEdits) addTo(ctx context.Context, api *apiClient, repo repoRef, 
 		return err
 	}
 	if e.labels.changed() {
+		add, err := resolveLabels(ctx, api, repo, e.labels.add)
+		if err != nil {
+			return err
+		}
 		names := make([]string, len(issue.Labels))
 		for i, l := range issue.Labels {
 			names[i] = l.Name
 		}
-		fields["labels"] = e.labels.apply(names)
+		edits := setEdits{add: add, remove: e.labels.remove}
+		fields["labels"] = edits.apply(names)
 	}
 	if e.assignees.changed() {
 		logins := make([]string, len(issue.Assignees))
@@ -212,4 +224,27 @@ func (e issueSetEdits) addTo(ctx context.Context, api *apiClient, repo repoRef, 
 		fields["assignees"] = e.assignees.apply(logins)
 	}
 	return nil
+}
+
+// resolveLabels returns names spelled as the repo's labels are, or an error
+// naming the first one the repo doesn't have. GitHub creates a label it
+// doesn't know when an issue is given one, so without this a typo would add
+// a label to the repo; gh looks the names up first too.
+func resolveLabels(ctx context.Context, api *apiClient, repo repoRef, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	labels, _, err := list[apiLabel](ctx, api, repo.path("labels"), nil, 0, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(names))
+	for i, name := range names {
+		j := slices.IndexFunc(labels, func(l apiLabel) bool { return strings.EqualFold(l.Name, name) })
+		if j < 0 {
+			return nil, fmt.Errorf("could not add label: '%s' not found", name)
+		}
+		out[i] = labels[j].Name
+	}
+	return out, nil
 }
