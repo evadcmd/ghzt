@@ -185,6 +185,7 @@ func TestGitCommitNothing(t *testing.T) {
 		{[]string{"README.md", "docs/a.md"}, "nothing to commit: the files are the same on branch main"},
 		{[]string{"--rm", "missing.md", "README.md"}, "--rm missing.md: no such file on branch main"},
 		{[]string{"--rm", "README.md/x"}, "--rm README.md/x: no such file on branch main"},
+		{[]string{"--rm", "lib/x"}, "--rm lib/x: no such file on branch main"},
 		{[]string{"--rm", "docs/new.md"}, "--rm docs/new.md: no such file on branch main"},
 		{[]string{"--rm", "docs"}, "--rm docs: a directory on branch main; give its files"},
 		{[]string{"docs/new.md", "--rm", "docs"}, "--rm docs: a directory on branch main"},
@@ -210,6 +211,29 @@ func TestGitCommitOverDirectory(t *testing.T) {
 	code, out, errOut := runWith(s, "git", "commit", "-R", "o/r", "--branch", "main", "-m", "x", "docs")
 	if code != 1 || out != "" || !strings.Contains(errOut, "docs: a directory on branch main") {
 		t.Errorf("got (%d, %q, %q)", code, out, errOut)
+	}
+}
+
+func TestGitCommitUnderFile(t *testing.T) {
+	var got []request
+	s := fakeGitHub(t, commitServer(t, &got))
+	root := withRoot(t, &s)
+	writeFiles(t, root, map[string]string{"README.md/x": "x\n", "lib/x": "x\n"})
+
+	for p, want := range map[string]string{
+		"README.md/x": "README.md/x: README.md is not a directory on branch main",
+		"lib/x":       "lib/x: lib is not a directory on branch main",
+	} {
+		got = nil
+		code, out, errOut := runWith(s, "git", "commit", "-R", "o/r", "--branch", "main", "-m", "x", p)
+		if code != 1 || out != "" || !strings.Contains(errOut, want) {
+			t.Errorf("%s: got (%d, %q, %q), want %q", p, code, out, errOut, want)
+		}
+		for _, r := range got {
+			if r.Method != http.MethodGet {
+				t.Errorf("%s: made %s %s", p, r.Method, r.Path)
+			}
+		}
 	}
 }
 
