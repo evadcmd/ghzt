@@ -65,11 +65,12 @@ from both, resolve with one side and fix the file with git commit
 afterwards. A path given to --ours or --theirs that isn't a conflict is an
 error. So is a file with files under it, as when one side replaces a
 directory with a file and the other adds a file in it: make the path a file
-or a directory on --branch with git commit, and run again. If the branches merge without a conflict, --ours and --theirs are not
-needed and not used.
+or a directory on --branch with git commit, and run again. If the branches
+merge without a conflict, --ours and --theirs are not needed and not used.
 
 The branch is moved without force, so if it moved on during the merge, the
-update fails and the branch is left as it was.
+update fails and the branch is left as it was. If the update gets no answer,
+or a server error, the branch is read back to tell whether it was moved.
 
 The message is "Merge branch '<head>' into <branch>" unless -m is given;
 several -m are joined as paragraphs.
@@ -326,9 +327,8 @@ func (m *merger) mergeByTree(ctx context.Context, msg string, resolutions map[st
 		return "", nil, fmt.Errorf("unexpected response creating the commit: %q", commit.SHA)
 	}
 	// Without force, the update fails if the branch is no longer at ours.
-	body = record{"sha": commit.SHA, "force": false}
-	if err := m.api.send(ctx, http.MethodPatch, m.repo.path(withSegments(m.base, "git", "refs", "heads")...), body, nil); err != nil {
-		return "", nil, fmt.Errorf("%w; commit %s was made but %s was not moved to it", err, commit.SHA, m.base)
+	if err := moveBranch(ctx, m.api, m.repo, m.base, commit.SHA); err != nil {
+		return "", nil, err
 	}
 	return commit.SHA, resolved, nil
 }
