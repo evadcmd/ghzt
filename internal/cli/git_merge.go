@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"path"
 	"slices"
 	"strings"
 
@@ -62,7 +63,9 @@ is written; run the command again with each one given to --ours, to keep the
 version on --branch, or --theirs, to take the one on <head>. To keep changes
 from both, resolve with one side and fix the file with git commit
 afterwards. A path given to --ours or --theirs that isn't a conflict is an
-error. If the branches merge without a conflict, --ours and --theirs are not
+error. So is a file with files under it, as when one side replaces a
+directory with a file and the other adds a file in it: make the path a file
+or a directory on --branch with git commit, and run again. If the branches merge without a conflict, --ours and --theirs are not
 needed and not used.
 
 The branch is moved without force, so if it moved on during the merge, the
@@ -235,6 +238,9 @@ func (m *merger) mergeByTree(ctx context.Context, msg string, resolutions map[st
 	}
 	var conflicts, resolved []string
 	var entries []record
+	// The files of the merge commit, to check after the loop that none of
+	// them is under another.
+	merged := maps.Clone(mine)
 	for _, p := range slices.Sorted(maps.Keys(paths)) {
 		o, inOld := old[p]
 		y, inMine := mine[p]
@@ -258,10 +264,12 @@ func (m *merger) mergeByTree(ctx context.Context, msg string, resolutions map[st
 		switch {
 		case inNext:
 			entries = append(entries, record{"path": p, "mode": t.Mode, "type": t.Type, "sha": t.SHA})
+			merged[p] = t
 		case inMine:
 			// Head deleted the path. A null SHA deletes it; mode and type
 			// must still match it.
 			entries = append(entries, record{"path": p, "mode": y.Mode, "type": y.Type, "sha": nil})
+			delete(merged, p)
 		}
 	}
 	if len(conflicts) > 0 {
@@ -277,6 +285,25 @@ func (m *merger) mergeByTree(ctx context.Context, msg string, resolutions map[st
 	if len(unused) > 0 {
 		slices.Sort(unused)
 		return "", nil, fmt.Errorf("these paths are not conflicts: %s; leave them out of --ours and --theirs", strings.Join(unused, ", "))
+	}
+	// Each side's changes can be fine on their own and still put a file
+	// where the other side has a directory, as when head replaces docs/ with
+	// a file and base adds docs/new.md. Git calls that a file/directory
+	// conflict; here it is an error, since resolving it means deleting files.
+	var blocked []string
+	seen := map[string]bool{}
+	for _, p := range slices.Sorted(maps.Keys(merged)) {
+		for dir := path.Dir(p); dir != "."; dir = path.Dir(dir) {
+			if _, ok := merged[dir]; ok && !seen[dir] {
+				seen[dir] = true
+				blocked = append(blocked, dir+" (with "+p+")")
+			}
+		}
+	}
+	if len(blocked) > 0 {
+		slices.Sort(blocked)
+		return "", nil, fmt.Errorf("these paths would be files with files under them: %s; make each one a file or a directory on %s with git commit, and run again",
+			strings.Join(blocked, ", "), m.base)
 	}
 
 	tree := ourTree

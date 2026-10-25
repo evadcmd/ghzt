@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
+	"path"
 	"strings"
 	"testing"
 )
@@ -59,11 +60,25 @@ var mergeFiles = map[string]map[string][2]string{
 // treeListing is the recursive listing of the tree id in mergeFiles, with
 // its directories.
 func treeListing(id string) map[string]any {
-	entries := []any{map[string]any{"path": "docs", "mode": "040000", "type": "tree", "sha": dirSHA}}
+	var entries []any
+	dirs := map[string]bool{}
 	for p, f := range mergeFiles[id] {
 		entries = append(entries, map[string]any{"path": p, "mode": f[0], "type": "blob", "sha": sha(f[1])})
+		for dir := path.Dir(p); dir != "." && !dirs[dir]; dir = path.Dir(dir) {
+			dirs[dir] = true
+			entries = append(entries, map[string]any{"path": dir, "mode": "040000", "type": "tree", "sha": dirSHA})
+		}
 	}
 	return map[string]any{"sha": id, "tree": entries, "truncated": false}
+}
+
+// withMergeFiles makes mergeServer serve files instead of mergeFiles for the
+// rest of the test.
+func withMergeFiles(t *testing.T, files map[string]map[string][2]string) {
+	t.Helper()
+	old := mergeFiles
+	mergeFiles = files
+	t.Cleanup(func() { mergeFiles = old })
 }
 
 func apiReply(status int, v any) http.HandlerFunc {
@@ -232,6 +247,79 @@ func TestGitMergeByTreeErrors(t *testing.T) {
 		// Nothing is written.
 		checkRequests(t, got, mergeReads)
 	}
+}
+
+func TestGitMergeFileDirectory(t *testing.T) {
+	for name, tc := range map[string]struct {
+		files map[string]map[string][2]string
+		args  []string
+		want  string
+	}{
+		// Theirs replaces docs/ with a file; ours adds a file in it.
+		"file over directory": {
+			map[string]map[string][2]string{
+				baseTreeID: {"docs/keep.md": {"100644", "a\n"}},
+				treeSHA:    {"docs/keep.md": {"100644", "a\n"}, "docs/new.md": {"100644", "n\n"}},
+				theirsTree: {"docs": {"100644", "d\n"}},
+			},
+			nil,
+			"these paths would be files with files under them: docs (with docs/new.md); make each one a file or a directory on feat/x with git commit, and run again",
+		},
+		// Ours edits x; theirs replaces it with x/y, which stays added when
+		// x is resolved with --ours.
+		"directory under file": {
+			map[string]map[string][2]string{
+				baseTreeID: {"x": {"100644", "a\n"}},
+				treeSHA:    {"x": {"100644", "b\n"}},
+				theirsTree: {"x/y": {"100644", "y\n"}},
+			},
+			[]string{"--ours", "x"},
+			"these paths would be files with files under them: x (with x/y);",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			withMergeFiles(t, tc.files)
+			var got []request
+			s := fakeGitHub(t, mergeServer(t, &got))
+
+			args := append([]string{"git", "merge", "-R", "o/r", "--branch", "feat/x"}, tc.args...)
+			code, out, errOut := runWith(s, append(args, "topic")...)
+			if code != 1 || out != "" || !strings.Contains(errOut, tc.want) {
+				t.Fatalf("got (%d, %q, %q), want %q", code, out, errOut, tc.want)
+			}
+			// Nothing is written.
+			checkRequests(t, got, mergeReads)
+		})
+	}
+}
+
+func TestGitMergeFileToDirectory(t *testing.T) {
+	// With --theirs, x is deleted and x/y added: no file is under another.
+	withMergeFiles(t, map[string]map[string][2]string{
+		baseTreeID: {"x": {"100644", "a\n"}},
+		treeSHA:    {"x": {"100644", "b\n"}},
+		theirsTree: {"x/y": {"100644", "y\n"}},
+	})
+	var got []request
+	s := fakeGitHub(t, mergeServer(t, &got))
+
+	code, out, errOut := runWith(s, "git", "merge", "-R", "o/r", "--branch", "feat/x", "--theirs", "x", "topic")
+	want := "[feat/x abcdef0] Merge branch 'topic' into feat/x\n" +
+		" resolved x with --theirs\n" +
+		"https://github.com/o/r/commit/" + commitSHA + "\n"
+	if code != exitOK || out != want || errOut != "" {
+		t.Fatalf("got (%d, %q, %q)", code, out, errOut)
+	}
+	checkRequests(t, got, append(append([]request{}, mergeReads...),
+		request{http.MethodPost, "/repos/o/r/git/trees", map[string]any{"base_tree": treeSHA, "tree": []any{
+			map[string]any{"path": "x", "mode": "100644", "type": "blob", "sha": nil},
+			map[string]any{"path": "x/y", "mode": "100644", "type": "blob", "sha": sha("y\n")},
+		}}},
+		request{http.MethodPost, "/repos/o/r/git/commits", map[string]any{
+			"message": "Merge branch 'topic' into feat/x\n", "tree": newTree, "parents": []any{testSHA, theirsSHA},
+		}},
+		request{http.MethodPatch, "/repos/o/r/git/refs/heads/feat/x", map[string]any{"sha": commitSHA, "force": false}},
+	))
 }
 
 func TestGitMergeWriteFails(t *testing.T) {
