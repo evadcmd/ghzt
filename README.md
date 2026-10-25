@@ -99,11 +99,22 @@ bin/ghzt git branch tmp-test main -R evadcmd/ghzt    # again: HTTP 422
 bin/ghzt git commit -R evadcmd/ghzt --branch tmp-test -m "test" README.md
 ```
 
+To try a merge with a conflict, commit a different edit of README.md to a
+second branch, then merge it:
+
+```sh
+bin/ghzt git branch tmp-test2 main -R evadcmd/ghzt
+bin/ghzt git commit -R evadcmd/ghzt --branch tmp-test2 -m "test 2" README.md
+bin/ghzt git merge -R evadcmd/ghzt --branch tmp-test tmp-test2   # lists README.md
+bin/ghzt git merge -R evadcmd/ghzt --branch tmp-test --theirs README.md tmp-test2
+```
+
 ghzt can't delete branches; remove a test branch on the web or with the real
 gh:
 
 ```sh
 gh api -X DELETE repos/evadcmd/ghzt/git/refs/heads/tmp-test
+gh api -X DELETE repos/evadcmd/ghzt/git/refs/heads/tmp-test2
 ```
 
 `--help` works on every command, and notes where it differs from the real gh
