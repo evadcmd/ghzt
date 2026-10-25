@@ -400,6 +400,86 @@ func TestGitCommitAPIErrors(t *testing.T) {
 	}
 }
 
+// TestGitCommitMoveUnanswered covers a branch update that gets no answer, or a
+// 5xx: GitHub may have moved the branch all the same, so it is read back.
+func TestGitCommitMoveUnanswered(t *testing.T) {
+	// hangUp closes the connection without a response, as when the network
+	// drops after GitHub got the request.
+	hangUp := func(w http.ResponseWriter) {
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}
+	badGateway := func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"message":"Bad Gateway"}`))
+	}
+	eof := `Patch "https://api.github.com/repos/o/r/git/refs/heads/main": EOF`
+	moved := "[main abcdef0] x\n 1 file changed\nhttps://github.com/o/r/commit/" + commitSHA + "\n"
+	for _, tc := range []struct {
+		name      string
+		moved     bool // whether GitHub moved the branch
+		answer    func(http.ResponseWriter)
+		readFails bool // whether reading the branch back fails
+		out, err  string
+	}{
+		{name: "moved, no answer", moved: true, answer: hangUp, out: moved},
+		{name: "moved, 502", moved: true, answer: badGateway, out: moved},
+		{name: "not moved, no answer", answer: hangUp, err: eof + "; commit " + commitSHA + " was made but main was not moved to it"},
+		{name: "not moved, 502", answer: badGateway, err: "HTTP 502: Bad Gateway (PATCH /repos/o/r/git/refs/heads/main); commit " + commitSHA + " was made but main was not moved to it"},
+		{
+			name: "read back fails", moved: true, answer: hangUp, readFails: true,
+			err: eof + "; commit " + commitSHA + " was made, and reading main back failed too (HTTP 500: 500 Internal Server Error (GET /repos/o/r/git/ref/heads/main)), so it may or may not have been moved to it: check with git show main",
+		},
+	} {
+		var got []request
+		ref, patched := testSHA, false
+		mux := commitServer(t, &got)
+		mux.HandleFunc("GET /repos/o/r/git/ref/heads/main", func(w http.ResponseWriter, r *http.Request) {
+			if patched && tc.readFails {
+				recorder(t, &got, nil)(httptest.NewRecorder(), r)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			recorder(t, &got, map[string]any{"object": map[string]any{"sha": ref, "type": "commit"}})(w, r)
+		})
+		mux.HandleFunc("PATCH /repos/o/r/git/refs/heads/main", func(w http.ResponseWriter, r *http.Request) {
+			recorder(t, &got, nil)(httptest.NewRecorder(), r)
+			patched = true
+			if tc.moved {
+				ref = commitSHA
+			}
+			tc.answer(w)
+		})
+		s := fakeGitHub(t, mux)
+		root := withRoot(t, &s)
+		writeFiles(t, root, map[string]string{"a.txt": "a"})
+
+		code, out, errOut := runWith(s, "git", "commit", "-R", "o/r", "--branch", "main", "-m", "x", "a.txt")
+		wantCode := exitOK
+		if tc.err != "" {
+			wantCode = 1
+		}
+		if code != wantCode || out != tc.out || !strings.Contains(errOut, tc.err) || (tc.err == "" && errOut != "") {
+			t.Errorf("%s: got (%d, %q, %q), want (%d, %q, %q)", tc.name, code, out, errOut, wantCode, tc.out, tc.err)
+		}
+		// The PATCH is sent once, not retried, and the branch read back after it.
+		patches := 0
+		for _, r := range got {
+			if r.Method == http.MethodPatch {
+				patches++
+			}
+		}
+		if n := len(got); patches != 1 || n < 2 || got[n-2].Method != http.MethodPatch || got[n-1].Path != "/repos/o/r/git/ref/heads/main" {
+			t.Errorf("%s: requests %+v", tc.name, got)
+		}
+	}
+}
+
 func TestGitCommitBadSHA(t *testing.T) {
 	for path, want := range map[string]string{
 		"GET /repos/o/r/git/commits/": `unexpected response reading commit ` + testSHA + `: tree ""`,

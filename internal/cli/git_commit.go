@@ -196,7 +196,8 @@ are left out, and if nothing is left, there is no commit. The author is
 whoever the token belongs to.
 
 The branch is moved without force, so if it moved on during the commit, the
-update fails and the branch is left as it was.
+update fails and the branch is left as it was. If the update gets no answer,
+or a server error, the branch is read back to tell whether it was moved.
 
 Like git, several -m are joined as paragraphs, and the message is cleaned
 up: trailing whitespace and extra blank lines are dropped.
@@ -363,9 +364,30 @@ func commitFiles(ctx context.Context, api *apiClient, repo repoRef, branch strin
 		return "", 0, fmt.Errorf("unexpected response creating the commit: %q", commit.SHA)
 	}
 	// Without force, the update fails if the branch is no longer at parent.
-	body = record{"sha": commit.SHA, "force": false}
-	if err := api.send(ctx, http.MethodPatch, repo.path(withSegments(branch, "git", "refs", "heads")...), body, nil); err != nil {
-		return "", 0, fmt.Errorf("%w; commit %s was made but %s was not moved to it", err, commit.SHA, branch)
+	if err := moveBranch(ctx, api, repo, branch, commit.SHA); err != nil {
+		return "", 0, err
 	}
 	return commit.SHA, len(entries), nil
+}
+
+// moveBranch moves branch to commit without force. Only a 4xx says the
+// branch wasn't moved: with no answer, or a 5xx, GitHub may have moved it all
+// the same, so the branch is read back, and if it is at commit, it was moved.
+func moveBranch(ctx context.Context, api *apiClient, repo repoRef, branch, commit string) error {
+	body := record{"sha": commit, "force": false}
+	err := api.send(ctx, http.MethodPatch, repo.path(withSegments(branch, "git", "refs", "heads")...), body, nil)
+	if err == nil {
+		return nil
+	}
+	// apiError's format.
+	if !strings.HasPrefix(err.Error(), "HTTP 4") {
+		var ref apiGitRef
+		if _, rerr := api.get(ctx, repo.path(withSegments(branch, "git", "ref", "heads")...), nil, &ref); rerr != nil {
+			return fmt.Errorf("%w; commit %s was made, and reading %s back failed too (%w), so it may or may not have been moved to it: check with git show %s", err, commit, branch, rerr, branch)
+		}
+		if ref.Object.SHA == commit {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w; commit %s was made but %s was not moved to it", err, commit, branch)
 }
