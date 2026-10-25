@@ -130,14 +130,22 @@ type baseTree struct {
 	dirs map[string]map[string]treeEntry // by tree SHA
 }
 
-// lookup returns the entry at p, and false if there is none.
+// errNotDir is what lookup returns when a directory in a path is a file or a
+// submodule: nothing can be put under it.
+var errNotDir = errors.New("is not a directory")
+
+// lookup returns the entry at p, and false if there is none. If a directory
+// in p is a file or a submodule instead, the error wraps errNotDir.
 func (t *baseTree) lookup(ctx context.Context, p string) (treeEntry, bool, error) {
 	segs := strings.Split(p, "/")
 	sha := t.root
-	for _, name := range segs[:len(segs)-1] {
+	for i, name := range segs[:len(segs)-1] {
 		e, ok, err := t.entry(ctx, sha, name)
-		if err != nil || !ok || e.Type != "tree" {
+		if err != nil || !ok {
 			return treeEntry{}, false, err
+		}
+		if e.Type != "tree" {
+			return treeEntry{}, false, fmt.Errorf("%s %w", strings.Join(segs[:i+1], "/"), errNotDir)
 		}
 		sha = e.SHA
 	}
@@ -286,7 +294,7 @@ func commitFiles(ctx context.Context, api *apiClient, repo repoRef, branch strin
 	for _, p := range removed {
 		e, ok, err := base.lookup(ctx, p)
 		switch {
-		case err != nil:
+		case err != nil && !errors.Is(err, errNotDir):
 			return "", 0, err
 		case !ok:
 			return "", 0, fmt.Errorf("--rm %s: no such file on branch %s", p, branch)
@@ -307,6 +315,9 @@ func commitFiles(ctx context.Context, api *apiClient, repo repoRef, branch strin
 		}
 		sha := blobSHA(data)
 		e, ok, err := base.lookup(ctx, p)
+		if errors.Is(err, errNotDir) {
+			return "", 0, fmt.Errorf("%s: %w on branch %s", p, err, branch)
+		}
 		if err != nil {
 			return "", 0, err
 		}
