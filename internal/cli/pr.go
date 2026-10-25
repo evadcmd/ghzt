@@ -64,6 +64,7 @@ type (
 		ID                  int64    `json:"id"`
 		InReplyToID         *int64   `json:"in_reply_to_id"`
 		PullRequestReviewID *int64   `json:"pull_request_review_id"`
+		PullRequestURL      string   `json:"pull_request_url"`
 		Path                string   `json:"path"`
 		Line                *int     `json:"line"`
 		Side                string   `json:"side"`
