@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -294,7 +295,20 @@ func TestPRViewComments(t *testing.T) {
 	if code != exitOK || stdout != want {
 		t.Errorf("got (%d, %q, %q), want %q", code, stdout, stderr, want)
 	}
+
+	// A failed write isn't an empty conversation, so it gets no note.
+	var errOut bytes.Buffer
+	s.Out, s.ErrOut = failWriter{}, &errOut
+	code = Run([]string{"gh", "pr", "view", "7", "-R", "o/r", "--comments"}, s)
+	if want := "gh: " + io.ErrClosedPipe.Error() + "\n"; code == exitOK || errOut.String() != want {
+		t.Errorf("failed write: got (%d, %q), want (non-zero, %q)", code, errOut.String(), want)
+	}
 }
+
+// failWriter fails every write, like stdout with its reader gone.
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 func TestNoResults(t *testing.T) {
 	mux := http.NewServeMux()

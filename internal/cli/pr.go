@@ -153,8 +153,11 @@ func newPRViewCmd(s IO) *cobra.Command {
 		if !js.enabled() {
 			if comments {
 				n, err := writeConversation(s.Out, cs, reviews, inline)
+				if err != nil {
+					return err
+				}
 				writeNoResults(s.ErrOut, n, "comments or reviews")
-				return err
+				return nil
 			}
 			return writePR(s.Out, pr)
 		}
