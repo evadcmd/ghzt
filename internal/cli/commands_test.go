@@ -296,6 +296,43 @@ func TestPRViewComments(t *testing.T) {
 	}
 }
 
+func TestNoResults(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.Handle("GET /repos/o/r/issues/3", reply(testIssue))
+	mux.Handle("GET /repos/o/r/pulls/7", reply(pull(7, "feat", "open", "")))
+	mux.Handle("GET /repos/o/r/pulls/7/reviews", reply([]any{
+		map[string]any{"id": 11, "user": map[string]any{"login": "me"}, "state": "PENDING", "body": "draft"},
+	}))
+	for _, p := range []string{"/repos/o/r/issues/3/comments", "/repos/o/r/issues/7/comments", "/repos/o/r/pulls/7/comments", "/repos/o/r/pulls", "/repos/o/r/labels"} {
+		mux.Handle("GET "+p, reply([]any{}))
+	}
+	mux.Handle("GET /search/issues", reply(map[string]any{"total_count": 0, "items": []any{}}))
+	s := fakeGitHub(t, mux)
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"issue", "view", "3", "--comments"}, "no comments found\n"},
+		{[]string{"pr", "view", "7", "--comments"}, "no comments or reviews found\n"},
+		{[]string{"pr", "list"}, "no pull requests found\n"},
+		{[]string{"label", "list"}, "no labels found\n"},
+		{[]string{"search", "issues", "bug"}, "no results found\n"},
+	}
+	for _, tt := range tests {
+		args := append([]string{"gh"}, tt.args...)
+		args = append(args, "-R", "o/r")
+		code, stdout, stderr := runWith(s, args...)
+		if code != exitOK || stdout != "" || stderr != tt.want {
+			t.Errorf("%v: got (%d, %q, %q), want (0, \"\", %q)", tt.args, code, stdout, stderr, tt.want)
+		}
+	}
+	// --json says it with [], so it gets no note.
+	code, stdout, stderr := runWith(s, "gh", "pr", "list", "-R", "o/r", "--json", "number")
+	if code != exitOK || stdout != "[]\n" || stderr != "" {
+		t.Errorf("--json: got (%d, %q, %q)", code, stdout, stderr)
+	}
+}
+
 func TestLabelList(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /repos/o/r/labels", reply([]any{

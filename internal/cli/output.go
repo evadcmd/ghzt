@@ -165,6 +165,15 @@ func writeMoreLeft(w io.Writer, more bool) {
 	}
 }
 
+// writeNoResults tells the caller, on stderr so stdout stays gh's, that text
+// output came out empty. gh prints nothing then when stdout isn't a terminal,
+// which an agent can't tell apart from a command that printed nothing at all.
+func writeNoResults(w io.Writer, n int, what string) {
+	if n == 0 {
+		_, _ = fmt.Fprintf(w, "no %s found\n", what)
+	}
+}
+
 // checkEnum returns an error unless value is one of allowed.
 func checkEnum(flag, value string, allowed ...string) error {
 	if !slices.Contains(allowed, value) {

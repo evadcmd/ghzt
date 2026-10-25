@@ -152,7 +152,9 @@ func newPRViewCmd(s IO) *cobra.Command {
 		}
 		if !js.enabled() {
 			if comments {
-				return writeConversation(s.Out, cs, reviews, inline)
+				n, err := writeConversation(s.Out, cs, reviews, inline)
+				writeNoResults(s.ErrOut, n, "comments or reviews")
+				return err
 			}
 			return writePR(s.Out, pr)
 		}
@@ -250,6 +252,7 @@ func newPRListCmd(s IO) *cobra.Command {
 			if err := writeRows(s.Out, rows); err != nil {
 				return err
 			}
+			writeNoResults(s.ErrOut, len(rows), "pull requests")
 		}
 		writeMoreLeft(s.ErrOut, more)
 		return nil
@@ -390,8 +393,9 @@ type conversationItem struct {
 }
 
 // writeConversation prints the conversation comments, reviews and inline
-// comments of a pull request by time, each with the ids that replies need.
-func writeConversation(w io.Writer, cs []apiComment, reviews []apiReview, inline []apiReviewComment) error {
+// comments of a pull request by time, each with the ids that replies need,
+// and returns how many items it printed.
+func writeConversation(w io.Writer, cs []apiComment, reviews []apiReview, inline []apiReviewComment) (int, error) {
 	var items []conversationItem
 	for _, c := range cs {
 		items = append(items, conversationItem{c.CreatedAt, []string{
@@ -439,11 +443,11 @@ func writeConversation(w io.Writer, cs []apiComment, reviews []apiReview, inline
 	slices.SortStableFunc(items, func(a, b conversationItem) int { return strings.Compare(a.at, b.at) })
 	for _, it := range items {
 		if err := writeFields(w, it.fields...); err != nil {
-			return err
+			return 0, err
 		}
 		if _, err := fmt.Fprintf(w, "--\n%s\n--\n", truncateText(it.body, maxBodyLen)); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return len(items), nil
 }
