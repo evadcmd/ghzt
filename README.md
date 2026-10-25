@@ -1,11 +1,83 @@
 # ghzt
 
 A cut-down `gh` and `git` that talk to the GitHub API instead of a local
-checkout. See [#3](https://github.com/evadcmd/ghzt/issues/3) for the design
-and roadmap.
+checkout, built for an AI agent rather than a person.
 
-This README only covers testing a local build against the real API for now.
-The full README comes once the roadmap is done.
+## Why
+
+ghzt exists to replace the GitHub MCP tools of taruza, a chat bot that works
+on GitHub repos for its users. Those tools cost the agent context twice: every
+tool schema sits in the prompt on every turn, and every call is a JSON shape
+the model has to learn from that schema. The agent already knows `gh` and
+`git`, so ghzt gives it those commands instead:
+
+- **Familiar commands, less context.** One binary, symlinked as `gh` and
+  `git`, with the subcommands and flags the agent already uses. Where ghzt
+  can't behave like the real CLI, `--help` says so.
+- **API only, no checkout.** Every command is a GitHub API call. Reading a
+  file is `git show main:go.mod`, committing is `git commit --branch b` with
+  files from a local folder, and nothing is ever cloned or pushed.
+- **A clean read/write split.** Read commands and write commands are separate
+  command prefixes, so the host can allow reads and ask before writes with
+  plain prefix rules. That's also why there is no `gh api`: it would let any
+  write through a read prefix.
+- **Output sized for a model.** Short human-readable text by default,
+  gh-style `--json` where gh has it, one-line errors with a non-zero exit, and
+  an explicit `… truncated, N more` marker instead of silently cut output.
+
+The design and roadmap live in
+[#3](https://github.com/evadcmd/ghzt/issues/3).
+
+## Design
+
+- **Busybox dispatch.** The command tree is picked by `argv[0]`: `gh`, `git`,
+  or `ghzt` for everything else.
+- **No implicit repo.** Every repo-scoped command needs `-R owner/repo`;
+  there is no local checkout to infer it from.
+- **Auth from the environment.** `GHZT_TOKEN`, minted by the host, or a
+  GitHub App ID and private key as the fallback.
+- **Confined local files.** Every local read or write (`--body-file`, `-o`,
+  the files `git commit` commits) goes through `os.Root` under `GHZT_ROOT`.
+  The folder is chosen by the environment, never by a command argument, and
+  symlinks are refused.
+- **Safe writes.** Branch updates are never forced, so a branch that moved
+  meanwhile isn't clobbered. `git commit` also checks every SHA taken from a
+  response before it goes into the next request.
+
+## Commands
+
+`gh`:
+
+- `gh issue view|create|comment|close|edit`
+- `gh pr view|list|create|edit|comment|review`
+- `gh label list|create`
+- `gh search issues|prs|repos|commits|code|users`
+
+`git`:
+
+- `git show <commit>` or `git show <ref>:<path>`: a commit's diff, or a
+  file's content
+- `git ls-tree [-r] [--name-only] <ref> [<path>...]`
+- `git branch <new> [<start-point>]`: create a branch (create only)
+- `git commit --branch <b> -m <msg> [--rm <path>]... <path>...`: commit
+  files from `GHZT_ROOT`
+- `git merge --branch <b> [--ours|--theirs <path>]... <head>`: merge, with
+  per-path conflict resolution
+
+`ghzt` only, since gh has no such commands:
+
+- `ghzt commit-comment <sha>`
+- `ghzt review-reply <pr> <comment-id>`
+- `ghzt review-resolve <pr> <comment-id>`
+
+`--help` on each command lists its flags and where it differs from the real
+gh or git. The full list of differences is in #3.
+
+## Status
+
+All the Go-side roadmap steps are merged. What's left is on the taruza side
+(installing the binary, the permission rules, and cutting over from the MCP
+tools) and a few live API checks; #3 tracks both.
 
 ## Testing locally
 
