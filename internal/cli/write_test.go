@@ -276,6 +276,7 @@ func TestPREdit(t *testing.T) {
 	var got []request
 	mux := http.NewServeMux()
 	mux.Handle("GET /repos/o/r/issues/7", reply(labeledIssue))
+	mux.Handle("GET /repos/o/r/labels", reply(repoLabels))
 	mux.Handle("PATCH /repos/o/r/pulls/7", recorder(t, &got, prURL))
 	mux.Handle("PATCH /repos/o/r/issues/7", recorder(t, &got, prURL))
 	s := fakeGitHub(t, mux)
@@ -293,8 +294,22 @@ func TestPREdit(t *testing.T) {
 		{http.MethodPatch, "/repos/o/r/pulls/7", map[string]any{"title": "Only title"}},
 	})
 
-	if code, _, errOut := runWith(s, "gh", "pr", "edit", "7", "-R", "o/r"); code != 1 || !strings.Contains(errOut, "field to edit") {
-		t.Errorf("nothing to edit: code %d, stderr %q", code, errOut)
+	got = nil
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "field to edit flag required"},
+		{[]string{"-t", "New", "--add-label", "nope"}, "could not add label: 'nope' not found"},
+	} {
+		args := append([]string{"gh", "pr", "edit", "7", "-R", "o/r"}, tc.args...)
+		code, _, errOut := runWith(s, args...)
+		if code != 1 || !strings.Contains(errOut, tc.want) {
+			t.Errorf("%q: code %d, stderr %q, want %q", tc.args, code, errOut, tc.want)
+		}
+	}
+	if len(got) != 0 {
+		t.Errorf("bad edits sent %d requests", len(got))
 	}
 }
 

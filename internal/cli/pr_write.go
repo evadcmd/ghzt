@@ -170,6 +170,12 @@ func newPREditCmd(s IO) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		// Look the labels up before the first write, so a bad one leaves
+		// the pull request as it was.
+		issueFields := record{}
+		if err := sets.addTo(ctx, api, repo.ref, number, issueFields); err != nil {
+			return err
+		}
 		n := strconv.Itoa(number)
 		var u string
 		if len(fields) > 0 {
@@ -180,10 +186,6 @@ func newPREditCmd(s IO) *cobra.Command {
 			u = pr.URL
 		}
 		if sets.changed() {
-			issueFields := record{}
-			if err := sets.addTo(ctx, api, repo.ref, number, issueFields); err != nil {
-				return err
-			}
 			var issue apiIssue
 			if err := api.send(ctx, http.MethodPatch, repo.ref.path("issues", n), issueFields, &issue); err != nil {
 				return err
