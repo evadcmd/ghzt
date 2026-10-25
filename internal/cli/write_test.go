@@ -54,14 +54,24 @@ func checkRequests(t *testing.T, got, want []request) {
 
 var issueURL = map[string]any{"number": 3, "html_url": "https://github.com/o/r/issues/3"}
 
+// repoLabels are the labels of the fake repo, for the commands that add
+// labels by name.
+var repoLabels = []any{
+	map[string]any{"name": "bug"},
+	map[string]any{"name": "p1"},
+	map[string]any{"name": "p2"},
+	map[string]any{"name": "enhancement"},
+}
+
 func TestIssueCreate(t *testing.T) {
 	var got []request
 	mux := http.NewServeMux()
+	mux.Handle("GET /repos/o/r/labels", reply(repoLabels))
 	mux.Handle("POST /repos/o/r/issues", recorder(t, &got, issueURL))
 	s := fakeGitHub(t, mux)
 
 	code, out, errOut := runWith(s, "gh", "issue", "create", "-R", "o/r", "-t", "Bug", "-b", "it broke",
-		"-l", "bug,p1", "-a", "minta")
+		"-l", "bug,P1", "-a", "minta")
 	if code != exitOK || out != "https://github.com/o/r/issues/3\n" || errOut != "" {
 		t.Fatalf("got (%d, %q, %q)", code, out, errOut)
 	}
@@ -73,6 +83,10 @@ func TestIssueCreate(t *testing.T) {
 	code, _, errOut = runWith(s, "gh", "issue", "create", "-R", "o/r", "-b", "no title")
 	if code != 1 || !strings.Contains(errOut, "--title required") || len(got) != 0 {
 		t.Errorf("no title: code %d, stderr %q, %d requests", code, errOut, len(got))
+	}
+	code, _, errOut = runWith(s, "gh", "issue", "create", "-R", "o/r", "-t", "Bug", "-l", "bug,nope")
+	if code != 1 || !strings.Contains(errOut, "could not add label: 'nope' not found") || len(got) != 0 {
+		t.Errorf("unknown label: code %d, stderr %q, %d requests", code, errOut, len(got))
 	}
 }
 
@@ -159,11 +173,12 @@ func TestIssueEdit(t *testing.T) {
 	var got []request
 	mux := http.NewServeMux()
 	mux.Handle("GET /repos/o/r/issues/3", reply(labeledIssue))
+	mux.Handle("GET /repos/o/r/labels", reply(repoLabels))
 	mux.Handle("PATCH /repos/o/r/issues/3", recorder(t, &got, issueURL))
 	s := fakeGitHub(t, mux)
 
 	code, out, errOut := runWith(s, "gh", "issue", "edit", "3", "-R", "o/r", "-t", "New title",
-		"--add-label", "p2,bug", "--remove-label", "p1")
+		"--add-label", "P2,bug", "--remove-label", "p1")
 	if code != exitOK || out != "https://github.com/o/r/issues/3\n" || errOut != "" {
 		t.Fatalf("got (%d, %q, %q)", code, out, errOut)
 	}
@@ -183,6 +198,7 @@ func TestIssueEdit(t *testing.T) {
 	}{
 		{nil, "field to edit flag required"},
 		{[]string{"-t", ""}, "title cannot be blank"},
+		{[]string{"--add-label", "p2,nope"}, "could not add label: 'nope' not found"},
 	} {
 		args := append([]string{"gh", "issue", "edit", "3", "-R", "o/r"}, tc.args...)
 		code, _, errOut := runWith(s, args...)
@@ -216,11 +232,12 @@ func TestPRCreate(t *testing.T) {
 	var got []request
 	mux := http.NewServeMux()
 	mux.Handle("GET /repos/o/r", reply(map[string]any{"full_name": "o/r", "default_branch": "trunk"}))
+	mux.Handle("GET /repos/o/r/labels", reply(repoLabels))
 	mux.Handle("POST /repos/o/r/pulls", recorder(t, &got, prURL))
 	mux.Handle("PATCH /repos/o/r/issues/7", recorder(t, &got, prURL))
 	s := fakeGitHub(t, mux)
 
-	code, out, errOut := runWith(s, "gh", "pr", "create", "-R", "o/r", "-t", "Add x", "-H", "feat/x", "-d", "-l", "enhancement")
+	code, out, errOut := runWith(s, "gh", "pr", "create", "-R", "o/r", "-t", "Add x", "-H", "feat/x", "-d", "-l", "Enhancement")
 	if code != exitOK || out != "https://github.com/o/r/pull/7\n" || errOut != "" {
 		t.Fatalf("got (%d, %q, %q)", code, out, errOut)
 	}
@@ -242,6 +259,7 @@ func TestPRCreate(t *testing.T) {
 		{[]string{"-t", "T"}, "--head required"},
 		{[]string{"-t", "T", "-H", "a:b:c"}, "invalid"},
 		{[]string{"-t", "T", "-H", "x", "-B", "a b"}, "invalid branch name"},
+		{[]string{"-t", "T", "-H", "x", "-l", "nope"}, "could not add label: 'nope' not found"},
 	} {
 		args := append([]string{"gh", "pr", "create", "-R", "o/r"}, tc.args...)
 		code, _, errOut := runWith(s, args...)
@@ -258,6 +276,7 @@ func TestPREdit(t *testing.T) {
 	var got []request
 	mux := http.NewServeMux()
 	mux.Handle("GET /repos/o/r/issues/7", reply(labeledIssue))
+	mux.Handle("GET /repos/o/r/labels", reply(repoLabels))
 	mux.Handle("PATCH /repos/o/r/pulls/7", recorder(t, &got, prURL))
 	mux.Handle("PATCH /repos/o/r/issues/7", recorder(t, &got, prURL))
 	s := fakeGitHub(t, mux)
@@ -275,8 +294,22 @@ func TestPREdit(t *testing.T) {
 		{http.MethodPatch, "/repos/o/r/pulls/7", map[string]any{"title": "Only title"}},
 	})
 
-	if code, _, errOut := runWith(s, "gh", "pr", "edit", "7", "-R", "o/r"); code != 1 || !strings.Contains(errOut, "field to edit") {
-		t.Errorf("nothing to edit: code %d, stderr %q", code, errOut)
+	got = nil
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "field to edit flag required"},
+		{[]string{"-t", "New", "--add-label", "nope"}, "could not add label: 'nope' not found"},
+	} {
+		args := append([]string{"gh", "pr", "edit", "7", "-R", "o/r"}, tc.args...)
+		code, _, errOut := runWith(s, args...)
+		if code != 1 || !strings.Contains(errOut, tc.want) {
+			t.Errorf("%q: code %d, stderr %q, want %q", tc.args, code, errOut, tc.want)
+		}
+	}
+	if len(got) != 0 {
+		t.Errorf("bad edits sent %d requests", len(got))
 	}
 }
 

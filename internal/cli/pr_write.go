@@ -88,6 +88,12 @@ func newPRCreateCmd(s IO) *cobra.Command {
 			base = r.DefaultBranch
 		}
 		fields["base"] = base
+		// The labels are looked up before the pull request is made, so a
+		// name the repo doesn't have fails the command without leaving one.
+		labelNames, err := resolveLabels(ctx, api, repo.ref, labels)
+		if err != nil {
+			return err
+		}
 		var pr apiPull
 		if err := api.send(ctx, http.MethodPost, repo.ref.path("pulls"), fields, &pr); err != nil {
 			return err
@@ -98,12 +104,12 @@ func newPRCreateCmd(s IO) *cobra.Command {
 		if err := writeURL(s.Out, pr.URL); err != nil {
 			return err
 		}
-		if len(labels) == 0 && len(assignees) == 0 {
+		if len(labelNames) == 0 && len(assignees) == 0 {
 			return nil
 		}
 		issueFields := record{}
-		if len(labels) > 0 {
-			issueFields["labels"] = labels
+		if len(labelNames) > 0 {
+			issueFields["labels"] = labelNames
 		}
 		if len(assignees) > 0 {
 			issueFields["assignees"] = assignees
@@ -164,6 +170,12 @@ func newPREditCmd(s IO) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		// Look the labels up before the first write, so a bad one leaves
+		// the pull request as it was.
+		issueFields := record{}
+		if err := sets.addTo(ctx, api, repo.ref, number, issueFields); err != nil {
+			return err
+		}
 		n := strconv.Itoa(number)
 		var u string
 		if len(fields) > 0 {
@@ -174,10 +186,6 @@ func newPREditCmd(s IO) *cobra.Command {
 			u = pr.URL
 		}
 		if sets.changed() {
-			issueFields := record{}
-			if err := sets.addTo(ctx, api, repo.ref, number, issueFields); err != nil {
-				return err
-			}
 			var issue apiIssue
 			if err := api.send(ctx, http.MethodPatch, repo.ref.path("issues", n), issueFields, &issue); err != nil {
 				return err
