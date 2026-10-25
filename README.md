@@ -79,6 +79,24 @@ All the Go-side roadmap steps are merged. What's left is on the taruza side
 (installing the binary, the permission rules, and cutting over from the MCP
 tools) and a few live API checks; #3 tracks both.
 
+## Releasing
+
+Pushing a `v*` tag builds an image holding only the binary, for
+`linux/amd64` and `linux/arm64`, and pushes it to
+`ghcr.io/evadcmd/ghzt:<tag>` (`.github/workflows/release.yml`). Other images
+copy the binary out of it:
+
+```dockerfile
+COPY --from=ghcr.io/evadcmd/ghzt:v0.1.0 /ghzt /usr/local/bin/ghzt
+```
+
+To try an unreleased build, build the image locally and copy from that tag
+instead:
+
+```sh
+docker build -t ghzt:dev .
+```
+
 ## Testing locally
 
 ### Build
