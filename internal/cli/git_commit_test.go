@@ -433,7 +433,7 @@ func TestGitCommitMoveUnanswered(t *testing.T) {
 		{name: "not moved, 502", answer: badGateway, err: "HTTP 502: Bad Gateway (PATCH /repos/o/r/git/refs/heads/main); commit " + commitSHA + " was made but main was not moved to it"},
 		{
 			name: "read back fails", moved: true, answer: hangUp, readFails: true,
-			err: eof + "; commit " + commitSHA + " was made, and reading main back failed too (HTTP 500: 500 Internal Server Error (GET /repos/o/r/git/ref/heads/main)), so it may or may not have been moved to it: check with git log",
+			err: eof + "; commit " + commitSHA + " was made, and reading main back failed too (HTTP 500: 500 Internal Server Error (GET /repos/o/r/git/ref/heads/main)), so it may or may not have been moved to it: check with git show main",
 		},
 	} {
 		var got []request
