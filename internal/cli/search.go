@@ -49,6 +49,8 @@ type searchSpec[T any] struct {
 	row    func(T) []string
 	// check, if not nil, rejects queries the endpoint would.
 	check func(query string) error
+	// note, if not empty, is a paragraph added to the help.
+	note string
 }
 
 func newSearchKindCmd[T any](s IO, spec searchSpec[T]) *cobra.Command {
@@ -65,6 +67,9 @@ func newSearchKindCmd[T any](s IO, spec searchSpec[T]) *cobra.Command {
 			"with spaces is searched as a phrase, unless it has a qualifier: then it is\n" +
 			"passed as is, so that \"repo:owner/repo bug\" works as one argument.",
 		Args: cobra.ArbitraryArgs,
+	}
+	if spec.note != "" {
+		cmd.Long += "\n\n" + spec.note
 	}
 	js := addJSONFlag(cmd, spec.fields...)
 	cmd.Flags().IntVarP(&limit, "limit", "L", 30, "Maximum number of results to fetch (at most 1000)")
@@ -220,6 +225,7 @@ type apiRepo struct {
 	Visibility      string `json:"visibility"`
 	Private         bool   `json:"private"`
 	Archived        bool   `json:"archived"`
+	Fork            bool   `json:"fork"`
 	Language        string `json:"language"`
 	DefaultBranch   string `json:"default_branch"`
 	StargazersCount int    `json:"stargazers_count"`
@@ -234,8 +240,8 @@ var repoSearch = searchSpec[apiRepo]{
 	endpoint: "repositories",
 	sorts:    []string{"forks", "help-wanted-issues", "stars", "updated"},
 	fields: []string{
-		"defaultBranch", "description", "forksCount", "fullName", "isArchived", "isPrivate",
-		"language", "stargazersCount", "updatedAt", "url", "visibility",
+		"defaultBranch", "description", "forksCount", "fullName", "isArchived", "isFork",
+		"isPrivate", "language", "stargazersCount", "updatedAt", "url", "visibility",
 	},
 	record: func(r apiRepo) record {
 		return record{
@@ -244,6 +250,7 @@ var repoSearch = searchSpec[apiRepo]{
 			"visibility":      r.Visibility,
 			"isPrivate":       r.Private,
 			"isArchived":      r.Archived,
+			"isFork":          r.Fork,
 			"language":        r.Language,
 			"defaultBranch":   r.DefaultBranch,
 			"stargazersCount": r.StargazersCount,
@@ -309,6 +316,10 @@ var codeSearch = searchSpec[apiCode]{
 		return record{"path": c.Path, "repository": repoName(c.Repository.FullName), "sha": c.SHA, "url": c.URL}
 	},
 	row: func(c apiCode) []string { return []string{c.Repository.FullName, c.Path} },
+	note: "Results come from the REST API's code search index, which some repos are\n" +
+		"missing from: a repo GitHub hasn't indexed returns nothing for any query.\n" +
+		"So no results (\"no results found\" on stderr, or [] with --json) doesn't\n" +
+		"mean the code isn't there. To read a repo's code, clone it instead.",
 }
 
 var userSearch = searchSpec[apiUser]{

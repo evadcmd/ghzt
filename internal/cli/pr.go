@@ -95,7 +95,7 @@ var (
 		"isDraft", "labels", "mergedAt", "number", "state", "title", "updatedAt", "url",
 	}
 	prViewFields = append(slices.Clone(prListFields),
-		"additions", "changedFiles", "comments", "commits", "deletions", "mergeable",
+		"additions", "changedFiles", "comments", "commits", "deletions", "files", "mergeable",
 		"reviewComments", "reviews",
 	)
 )
@@ -175,6 +175,13 @@ func newPRViewCmd(s IO) *cobra.Command {
 				return err
 			}
 			r["commits"] = commits
+		}
+		if js.wants("files") {
+			files, err := pullFiles(ctx, api, repo.ref, number)
+			if err != nil {
+				return err
+			}
+			r["files"] = files
 		}
 		return js.writeRecord(s.Out, r)
 	}
@@ -327,6 +334,35 @@ func pullCommits(ctx context.Context, api *apiClient, repo repoRef, number int) 
 		}
 	}
 	return out, nil
+}
+
+// pullFiles returns the pull request's changed files as gh's files field. The
+// API lists at most 3000.
+func pullFiles(ctx context.Context, api *apiClient, repo repoRef, number int) ([]record, error) {
+	files, _, err := list[apiCommitFile](ctx, api, repo.path("pulls", strconv.Itoa(number), "files"), nil, 0, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]record, len(files))
+	for i, f := range files {
+		out[i] = record{
+			"path":       f.Filename,
+			"additions":  f.Additions,
+			"deletions":  f.Deletions,
+			"changeType": changeType(f.Status),
+		}
+	}
+	return out, nil
+}
+
+// changeType is gh's changeType for the API's file status: the same word in
+// capitals, except that the API's "removed" is gh's "DELETED". The API's
+// "unchanged" has no gh value and passes through as "UNCHANGED".
+func changeType(status string) string {
+	if status == "removed" {
+		return "DELETED"
+	}
+	return strings.ToUpper(status)
 }
 
 func reviewRecords(rs []apiReview) []record {

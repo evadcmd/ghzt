@@ -64,6 +64,11 @@ func newLabelCreateCmd(s IO) *cobra.Command {
 		}
 		var l apiLabel
 		if err := api.send(ctx, http.MethodPost, repo.ref.path("labels"), fields, &l); err != nil {
+			// gh says this too, but points to its --force, which updates the
+			// label and which ghzt doesn't have.
+			if hasErrorItem(err, http.StatusUnprocessableEntity, "Label", "name", "already_exists") {
+				return fmt.Errorf("label with name %q already exists; updating it (gh's --force) isn't supported", name)
+			}
 			return err
 		}
 		return writeURL(s.Out, labelURL(repo.ref, l.Name))

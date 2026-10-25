@@ -28,7 +28,7 @@ type bodyFlags struct {
 func addBodyFlags(cmd *cobra.Command, usage string) *bodyFlags {
 	f := &bodyFlags{}
 	cmd.Flags().StringVarP(&f.body, "body", "b", "", usage)
-	cmd.Flags().StringVarP(&f.file, "body-file", "F", "", "Read body text from file (use \"-\" to read from standard input)")
+	cmd.Flags().StringVarP(&f.file, "body-file", "F", "", "Read body text from file (use \"-\" to read from standard input, if the caller passes one; none reads as empty)")
 	cmd.MarkFlagsMutuallyExclusive("body", "body-file")
 	return f
 }

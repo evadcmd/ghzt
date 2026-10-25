@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -175,8 +176,12 @@ func (c *apiClient) request(ctx context.Context, method, path string, query url.
 // rate limit says when it resets, which is what the caller needs to know.
 func apiError(resp *http.Response, method, path string) error {
 	msg := resp.Status
-	if herr, ok := errors.AsType[*ghAPI.HTTPError](ghAPI.HandleHTTPError(resp)); ok && herr.Message != "" {
-		msg = strings.ReplaceAll(herr.Message, "\n", "; ")
+	var items []ghAPI.HTTPErrorItem
+	if herr, ok := errors.AsType[*ghAPI.HTTPError](ghAPI.HandleHTTPError(resp)); ok {
+		items = herr.Errors
+		if herr.Message != "" {
+			msg = strings.ReplaceAll(herr.Message, "\n", "; ")
+		}
 	}
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
 		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
@@ -186,7 +191,33 @@ func apiError(resp *http.Response, method, path string) error {
 			}
 		}
 	}
-	return fmt.Errorf("HTTP %d: %s (%s %s)", resp.StatusCode, msg, method, path)
+	return &httpError{
+		status: resp.StatusCode,
+		items:  items,
+		text:   fmt.Sprintf("HTTP %d: %s (%s %s)", resp.StatusCode, msg, method, path),
+	}
+}
+
+// httpError is an error response, keeping GitHub's error items for commands
+// that turn a known one into a message of their own.
+type httpError struct {
+	status int
+	items  []ghAPI.HTTPErrorItem
+	text   string
+}
+
+func (e *httpError) Error() string { return e.text }
+
+// hasErrorItem reports whether err is an error response with status and an error item
+// with code for field of resource.
+func hasErrorItem(err error, status int, resource, field, code string) bool {
+	herr, ok := errors.AsType[*httpError](err)
+	if !ok || herr.status != status {
+		return false
+	}
+	return slices.ContainsFunc(herr.items, func(i ghAPI.HTTPErrorItem) bool {
+		return i.Resource == resource && i.Field == field && i.Code == code
+	})
 }
 
 // hasNextPage reports whether the Link header points to another page.

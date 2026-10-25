@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,6 +124,14 @@ func TestReadFile(t *testing.T) {
 
 	_, err := r.ReadFile("sub/body.md", 4)
 	wantErr(t, err, "larger than 4 bytes")
+
+	// A missing file is named as the caller gave it, not by os.Root's
+	// syscall and relative path, and is still fs.ErrNotExist.
+	name := filepath.Join(dir, "sub", "missing.md")
+	_, err = r.ReadFile(name, 100)
+	if want := name + ": no such file or directory"; err == nil || err.Error() != want || !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("err = %v, want %q and fs.ErrNotExist", err, want)
+	}
 }
 
 func TestReadFileMode(t *testing.T) {
@@ -208,6 +218,14 @@ func TestWriteFile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			wantErr(t, r.WriteFile(tt.name, []byte("x")), tt.want)
 		})
+	}
+	// Like ReadFile, errors name the path as the caller gave it, here with
+	// a regular file where a parent directory should be. The error itself is
+	// os.Root's (EEXIST, from mkdirat on sub/body.md), so only the name is
+	// checked.
+	name := filepath.Join(dir, "sub", "body.md", "out.txt")
+	if err := r.WriteFile(name, []byte("x")); err == nil || !strings.HasPrefix(err.Error(), name+": ") {
+		t.Errorf("err = %v, want it to start with %q", err, name+": ")
 	}
 	if got, _ := os.ReadFile(secret); string(got) != "key" { //nolint:gosec // G304: a path under the test temp dir.
 		t.Errorf("secret = %q, want it untouched", got)

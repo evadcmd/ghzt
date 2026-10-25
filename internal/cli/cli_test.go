@@ -58,8 +58,12 @@ func TestRunRejectsUnknownCommands(t *testing.T) {
 		{[]string{"ghzt", "bogus"}, `ghzt: unknown command "bogus" for "ghzt"`},
 		{[]string{"gh", "bogus"}, `gh: unknown command "bogus" for "gh"`},
 		{[]string{"git", "bogus"}, `git: unknown command "bogus" for "git"`},
-		{[]string{"ghzt", "gh", "bogus"}, `ghzt: unknown command "bogus" for "ghzt gh"`},
-		{[]string{"ghzt", "git", "bogus"}, `ghzt: unknown command "bogus" for "ghzt git"`},
+		{[]string{"ghzt", "gh", "bogus"}, `gh: unknown command "bogus" for "gh"`},
+		{[]string{"ghzt", "git", "bogus"}, `git: unknown command "bogus" for "git"`},
+		// An unknown command followed by a flag is still an unknown command,
+		// not an unknown flag of its parent.
+		{[]string{"gh", "repo", "view", "-R", "o/r"}, `gh: unknown command "repo" for "gh"` + "\nRun 'gh --help' for usage.\n"},
+		{[]string{"gh", "issue", "bogus", "--json", "x"}, `gh: unknown command "bogus" for "gh issue"` + "\nRun 'gh issue --help' for usage.\n"},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
@@ -68,6 +72,22 @@ func TestRunRejectsUnknownCommands(t *testing.T) {
 				t.Errorf("got (%d, %q, %q), want (%d, \"\", %q...)", code, stdout, stderr, exitError, tt.want)
 			}
 		})
+	}
+}
+
+// Under ghzt, gh and git print their usage as the command the caller types.
+func TestRunNamesSubtreesAsGhAndGit(t *testing.T) {
+	_, stdout, _ := run("ghzt", "gh", "issue", "close", "--help")
+	if !strings.Contains(stdout, "  gh issue close <number>") || strings.Contains(stdout, "ghzt") {
+		t.Errorf("help = %q, want usage gh issue close", stdout)
+	}
+	_, stdout, _ = run("ghzt", "--help")
+	if !strings.Contains(stdout, "  gh ") || !strings.Contains(stdout, "  git ") {
+		t.Errorf("ghzt help = %q, want gh and git listed", stdout)
+	}
+	_, _, stderr := run("ghzt", "git", "show", "--bogus")
+	if want := "git: unknown flag: --bogus\nRun 'git show --help' for usage.\n"; stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 }
 
@@ -115,8 +135,8 @@ func TestRunLogsFlagNamesNotArgs(t *testing.T) {
 	if err := json.Unmarshal(logged.Bytes(), &rec); err != nil {
 		t.Fatalf("log = %q, want one JSON record: %v", logged.String(), err)
 	}
-	if rec["command"] != "ghzt gh" || fmt.Sprint(rec["flags"]) != "[version]" {
-		t.Errorf("record = %v, want command %q and flags [version]", rec, "ghzt gh")
+	if rec["name"] != "ghzt" || rec["command"] != "gh" || fmt.Sprint(rec["flags"]) != "[version]" {
+		t.Errorf("record = %v, want name ghzt, command gh and flags [version]", rec)
 	}
 	if _, ok := rec["args"]; ok || strings.Contains(logged.String(), "--version=true") {
 		t.Errorf("log = %q, want no raw args", logged.String())
