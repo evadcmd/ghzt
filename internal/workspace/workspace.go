@@ -54,8 +54,8 @@ func FromEnv(getenv func(string) string) (*Root, error) {
 // dir itself is opened, not its resolved path: a caller can pin the root
 // with /proc/self/fd/N, and resolving that gives back a path that may be
 // swapped for a symlink before it is opened. The resolved path only matches
-// absolute names (rel), so if it is stale, those are refused, but nothing
-// is reached outside the directory opened.
+// absolute names (rel), so if it is stale, those names still resolve inside
+// the directory opened, and nothing outside it is reached.
 func Open(dir string) (*Root, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, fmt.Errorf("root %q is not an absolute path", dir)
