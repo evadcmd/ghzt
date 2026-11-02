@@ -24,10 +24,16 @@ const EnvRoot = "GHZT_ROOT"
 // as the file itself is refused, so what is read or written is always a
 // regular file in the root.
 type Root struct {
-	dir     string // as given, for messages
-	realDir string // dir with symlinks resolved
+	dir string // as given
+	// dir with symlinks resolved, for messages too: dir may be a
+	// /proc/self/fd/N handed down by the caller, which tells the user nothing.
+	realDir string
 	root    *os.Root
 }
+
+// evalSymlinks is filepath.EvalSymlinks, a variable so that a test can swap
+// the root's path right after it is resolved.
+var evalSymlinks = filepath.EvalSymlinks
 
 // FromEnv opens the root named by GHZT_ROOT, read with getenv, or the
 // working directory if it is unset.
@@ -44,16 +50,23 @@ func FromEnv(getenv func(string) string) (*Root, error) {
 }
 
 // Open opens dir as a root. dir must be absolute.
+//
+// dir itself is opened, not its resolved path: a caller can pin the root
+// with /proc/self/fd/N, and resolving that gives back a path that may be
+// swapped for a symlink before it is opened. The resolved path only matches
+// absolute names (rel), so if it is stale, those names still resolve inside
+// the directory opened, and nothing outside it is reached.
 func Open(dir string) (*Root, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, fmt.Errorf("root %q is not an absolute path", dir)
 	}
-	realDir, err := filepath.EvalSymlinks(dir)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.OpenRoot(realDir)
+	realDir, err := evalSymlinks(dir)
 	if err != nil {
+		_ = root.Close()
 		return nil, err
 	}
 	return &Root{dir: filepath.Clean(dir), realDir: realDir, root: root}, nil
@@ -77,7 +90,7 @@ func (r *Root) rel(name string) (string, error) {
 		}
 	}
 	if !filepath.IsLocal(rel) {
-		return "", fmt.Errorf("%s: outside %s", name, r.dir)
+		return "", fmt.Errorf("%s: outside %s", name, r.realDir)
 	}
 	return filepath.Clean(rel), nil
 }

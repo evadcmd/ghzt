@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,10 +11,15 @@ import (
 )
 
 // setup makes base/user as a root with a file in it, and a secret file next
-// to base, outside the root.
+// to base, outside the root. The paths have no symlinks in them, so dir is
+// also the root's resolved path, which absolute names and messages use.
 func setup(t *testing.T) (r *Root, base, dir, secret string) {
 	t.Helper()
-	tmp := t.TempDir()
+	// The temp dir may be under a symlink (/var -> /private/var on macOS).
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	base = filepath.Join(tmp, "workspace")
 	dir = filepath.Join(base, "user")
 	secret = filepath.Join(tmp, "secret.pem")
@@ -28,7 +34,7 @@ func setup(t *testing.T) (r *Root, base, dir, secret string) {
 			t.Fatal(err)
 		}
 	}
-	r, err := Open(dir)
+	r, err = Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +176,61 @@ func TestSymlinkedRootTakesBothSpellings(t *testing.T) {
 		}
 	}
 	_, err = r.ReadFile(filepath.Join(base, "other.md"), 5)
-	wantErr(t, err, "outside "+link)
+	wantErr(t, err, "outside "+dir)
+}
+
+// The directory opened is the one dir named when Open was called, even if
+// its path is swapped for a symlink right after it is resolved.
+func TestOpenDoesNotReopenTheResolvedPath(t *testing.T) {
+	_, base, dir, secret := setup(t)
+	moved := filepath.Join(base, "moved")
+	t.Cleanup(func() { evalSymlinks = filepath.EvalSymlinks })
+	evalSymlinks = func(path string) (string, error) {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err == nil {
+			err = os.Rename(dir, moved)
+		}
+		if err == nil {
+			err = os.Symlink(filepath.Dir(secret), dir)
+		}
+		return resolved, err
+	}
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+
+	if got, err := r.ReadFile("sub/body.md", 5); err != nil || string(got) != "hello" {
+		t.Errorf("ReadFile(sub/body.md) = %q, %v; want hello", got, err)
+	}
+	_, err = r.ReadFile("secret.pem", 100)
+	wantErr(t, err, "no such file")
+}
+
+// A caller can pin the root with a directory fd; absolute names are then
+// spelled with the directory's path, and messages name it too.
+func TestFdRoot(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("no /proc/self/fd")
+	}
+	_, base, dir, _ := setup(t)
+	f, err := os.Open(dir) //nolint:gosec // G304: a path under the test temp dir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	r, err := Open(fmt.Sprintf("/proc/self/fd/%d", f.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+
+	if got, err := r.ReadFile(filepath.Join(dir, "sub", "body.md"), 5); err != nil || string(got) != "hello" {
+		t.Errorf("ReadFile = %q, %v; want hello", got, err)
+	}
+	_, err = r.ReadFile(filepath.Join(base, "other.md"), 5)
+	wantErr(t, err, "outside "+dir)
 }
 
 func TestReadInput(t *testing.T) {
