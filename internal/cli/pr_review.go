@@ -170,11 +170,15 @@ func parseCommentID(s string) (int64, error) {
 }
 
 // threadStart returns the ID of the comment that starts the review thread
-// comment id is in: replies point to it, never to another reply.
-func threadStart(ctx context.Context, api *apiClient, repo repoRef, id int64) (int64, error) {
+// comment id is in: replies point to it, never to another reply. The comment
+// is looked up by repo alone, so it is checked to be on pull request number.
+func threadStart(ctx context.Context, api *apiClient, repo repoRef, number int, id int64) (int64, error) {
 	var comment apiReviewComment
 	if _, err := api.get(ctx, repo.path("pulls", "comments", strconv.FormatInt(id, 10)), nil, &comment); err != nil {
 		return 0, err
+	}
+	if !strings.HasSuffix(comment.PullRequestURL, "/pulls/"+strconv.Itoa(number)) {
+		return 0, fmt.Errorf("comment %d is not in a review thread of pull request %s#%d", id, repo, number)
 	}
 	if comment.InReplyToID != nil {
 		return *comment.InReplyToID, nil
@@ -214,7 +218,7 @@ func newReviewReplyCmd(s IO) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		start, err := threadStart(ctx, api, repo.ref, id)
+		start, err := threadStart(ctx, api, repo.ref, number, id)
 		if err != nil {
 			return err
 		}
@@ -336,7 +340,7 @@ func newReviewResolveCmd(s IO) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		start, err := threadStart(ctx, api, repo.ref, id)
+		start, err := threadStart(ctx, api, repo.ref, number, id)
 		if err != nil {
 			return err
 		}

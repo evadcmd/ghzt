@@ -110,9 +110,11 @@ func TestPRReviewInvalid(t *testing.T) {
 func reviewComments(mux *http.ServeMux) {
 	mux.HandleFunc("GET /repos/o/r/pulls/comments/10", reply(map[string]any{
 		"id": 10, "html_url": "https://github.com/o/r/pull/3#discussion_r10",
+		"pull_request_url": "https://api.github.com/repos/o/r/pulls/3",
 	}))
 	mux.HandleFunc("GET /repos/o/r/pulls/comments/11", reply(map[string]any{
 		"id": 11, "in_reply_to_id": 10, "html_url": "https://github.com/o/r/pull/3#discussion_r11",
+		"pull_request_url": "https://api.github.com/repos/o/r/pulls/3",
 	}))
 }
 
@@ -142,6 +144,7 @@ func TestReviewReply(t *testing.T) {
 		{[]string{"3", "r10", "-b", "x"}, `invalid comment ID "r10"`},
 		{[]string{"3", "10"}, "--body or --body-file required"},
 		{[]string{"3", "99", "-b", "x"}, "HTTP 404"},
+		{[]string{"30", "11", "-b", "x"}, "comment 11 is not in a review thread of pull request o/r#30"},
 	} {
 		args := append([]string{"ghzt", "review-reply", "-R", "o/r"}, tc.args...)
 		code, _, errOut := runWith(s, args...)
@@ -211,7 +214,13 @@ func TestReviewResolve(t *testing.T) {
 	}}
 	mux := http.NewServeMux()
 	reviewComments(mux)
-	mux.HandleFunc("GET /repos/o/r/pulls/comments/8", reply(map[string]any{"id": 8}))
+	mux.HandleFunc("GET /repos/o/r/pulls/comments/8", reply(map[string]any{
+		"id": 8, "pull_request_url": "https://api.github.com/repos/o/r/pulls/3",
+	}))
+	// 12 is on pull request 4, which the GraphQL server doesn't know.
+	mux.HandleFunc("GET /repos/o/r/pulls/comments/12", reply(map[string]any{
+		"id": 12, "pull_request_url": "https://api.github.com/repos/o/r/pulls/4",
+	}))
 	mux.Handle("POST /graphql", g)
 	s := fakeGitHub(t, mux)
 
@@ -238,7 +247,9 @@ func TestReviewResolve(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"4", "10"}, "pull request o/r#4 not found"},
+		{[]string{"4", "12"}, "pull request o/r#4 not found"},
+		{[]string{"4", "10"}, "comment 10 is not in a review thread of pull request o/r#4"},
+		{[]string{"30", "10"}, "comment 10 is not in a review thread of pull request o/r#30"},
 		{[]string{"3", "99"}, "HTTP 404"},
 	} {
 		args := append([]string{"ghzt", "review-resolve", "-R", "o/r"}, tc.args...)

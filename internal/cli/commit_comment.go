@@ -25,7 +25,9 @@ func newCommitCommentCmd(s IO) *cobra.Command {
 		Short: "Add a comment to a commit",
 		Long: "Add a comment to a commit, or with --path to a file in its diff.\n\n" +
 			"--position is the line index in the file's diff, not its line number,\n" +
-			"as the API takes it. Prints the URL of the new comment.",
+			"as the API takes it. GitHub doesn't check --path against the diff: a\n" +
+			"file that isn't in it still gets the comment. Prints the URL of the\n" +
+			"new comment.",
 		Args: cobra.ExactArgs(1),
 	}
 	repo := addRepoFlag(cmd)
