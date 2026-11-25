@@ -93,8 +93,9 @@ func newPRReviewCmd(s IO) *cobra.Command {
 			"--comments-file adds inline comments: a JSON array of\n" +
 			"{\"path\", \"line\", \"side\", \"body\"} objects, where line is the line\n" +
 			"number in the file and side is LEFT (the base) or RIGHT (the head, the\n" +
-			"default). A body is required to request changes, and to comment\n" +
-			"without inline comments. Prints the URL of the review.",
+			"default), in the pull request's head commit. A body is required to\n" +
+			"request changes, and to comment without inline comments. Prints the\n" +
+			"URL of the review.",
 		Args: cobra.ExactArgs(1),
 	}
 	repo := addRepoFlag(cmd)
@@ -142,13 +143,21 @@ func newPRReviewCmd(s IO) *cobra.Command {
 		if text != "" {
 			fields["body"] = text
 		}
-		if len(comments) > 0 {
-			fields["comments"] = comments
-		}
 		ctx := c.Context()
 		api, err := newAPIClient(ctx, s)
 		if err != nil {
 			return err
+		}
+		if len(comments) > 0 {
+			fields["comments"] = comments
+			// The commit the lines are in, the head. GitHub defaults to it,
+			// but answered every review with inline comments and no commit_id
+			// on evadcmd/ivo#29 with a 5xx, so it's named here.
+			var pull apiPull
+			if _, err := api.get(ctx, repo.ref.path("pulls", strconv.Itoa(number)), nil, &pull); err != nil {
+				return err
+			}
+			fields["commit_id"] = pull.Head.SHA
 		}
 		var review apiReview
 		if err := api.send(ctx, http.MethodPost, repo.ref.path("pulls", strconv.Itoa(number), "reviews"), fields, &review); err != nil {

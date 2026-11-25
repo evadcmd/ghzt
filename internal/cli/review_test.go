@@ -15,6 +15,7 @@ func TestPRReview(t *testing.T) {
 	var got []request
 	mux := http.NewServeMux()
 	mux.Handle("POST /repos/o/r/pulls/3/reviews", recorder(t, &got, reviewURL))
+	mux.HandleFunc("GET /repos/o/r/pulls/3", reply(map[string]any{"number": 3, "head": map[string]any{"ref": "x", "sha": "abc123"}}))
 	s := fakeGitHub(t, mux)
 	root := withRoot(t, &s)
 	comments := `[{"path": "a/b.go", "line": 7, "body": "why?"}, {"path": "c.go", "line": 2, "side": "LEFT", "body": "gone"}]`
@@ -29,7 +30,7 @@ func TestPRReview(t *testing.T) {
 		{[]string{"--approve"}, map[string]any{"event": "APPROVE"}},
 		{[]string{"-a", "-b", "lgtm"}, map[string]any{"event": "APPROVE", "body": "lgtm"}},
 		{[]string{"-r", "-b", "no"}, map[string]any{"event": "REQUEST_CHANGES", "body": "no"}},
-		{[]string{"-c", "--comments-file", "c.json"}, map[string]any{"event": "COMMENT", "comments": []any{
+		{[]string{"-c", "--comments-file", "c.json"}, map[string]any{"event": "COMMENT", "commit_id": "abc123", "comments": []any{
 			map[string]any{"path": "a/b.go", "line": float64(7), "body": "why?"},
 			map[string]any{"path": "c.go", "line": float64(2), "side": "LEFT", "body": "gone"},
 		}}},
@@ -46,7 +47,7 @@ func TestPRReview(t *testing.T) {
 	got = nil
 	s.In = strings.NewReader(comments)
 	code, _, errOut := runWith(s, "gh", "pr", "review", "3", "-R", "o/r", "-c", "-b", "see inline", "--comments-file", "-")
-	if code != exitOK || len(got) != 1 || got[0].Body["body"] != "see inline" || len(got[0].Body["comments"].([]any)) != 2 {
+	if code != exitOK || len(got) != 1 || got[0].Body["body"] != "see inline" || len(got[0].Body["comments"].([]any)) != 2 || got[0].Body["commit_id"] != "abc123" {
 		t.Errorf("comments from stdin: code %d, stderr %q, requests %+v", code, errOut, got)
 	}
 }
