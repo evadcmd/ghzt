@@ -173,7 +173,9 @@ func (c *apiClient) request(ctx context.Context, method, path string, query url.
 
 // apiError turns an error response into one line: the status, GitHub's
 // messages joined with "; ", and the request without the host or query. A
-// rate limit says when it resets, which is what the caller needs to know.
+// rate limit says when it resets, which is what the caller needs to know. A
+// server error has GitHub's request ID, the one thing GitHub Support can find
+// out what went wrong with.
 func apiError(resp *http.Response, method, path string) error {
 	msg := resp.Status
 	var items []ghAPI.HTTPErrorItem
@@ -191,10 +193,14 @@ func apiError(resp *http.Response, method, path string) error {
 			}
 		}
 	}
+	request := method + " " + path
+	if id := resp.Header.Get("X-GitHub-Request-Id"); id != "" && resp.StatusCode >= 500 {
+		request += ", request ID " + id
+	}
 	return &httpError{
 		status: resp.StatusCode,
 		items:  items,
-		text:   fmt.Sprintf("HTTP %d: %s (%s %s)", resp.StatusCode, msg, method, path),
+		text:   fmt.Sprintf("HTTP %d: %s (%s)", resp.StatusCode, msg, request),
 	}
 }
 

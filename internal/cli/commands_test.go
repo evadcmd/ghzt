@@ -161,10 +161,17 @@ func TestAPIErrors(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded for installation"}`))
 	})
+	mux.HandleFunc("GET /repos/o/r/issues/500", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-GitHub-Request-Id", "C0DE:1234:5678")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"Server Error"}`))
+	})
 	s := fakeGitHub(t, mux)
 	tests := []struct{ number, want string }{
 		{"404", "gh: HTTP 404: Not Found (GET /repos/o/r/issues/404)\n"},
 		{"403", "gh: HTTP 403: API rate limit exceeded, resets at 2026-10-24T00:00:00Z (GET /repos/o/r/issues/403)\n"},
+		{"500", "gh: HTTP 500: Server Error (GET /repos/o/r/issues/500, request ID C0DE:1234:5678)\n"},
 	}
 	for _, tt := range tests {
 		code, stdout, stderr := runWith(s, "gh", "issue", "view", tt.number, "-R", "o/r")
