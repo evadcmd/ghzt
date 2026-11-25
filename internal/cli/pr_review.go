@@ -84,7 +84,7 @@ func readReviewComments(s IO, name string) ([]reviewComment, error) {
 func newPRReviewCmd(s IO) *cobra.Command {
 	var (
 		approve, comment, requestChanges bool
-		commentsFile                     string
+		commentsFile, commit             string
 	)
 	cmd := &cobra.Command{
 		Use:   "review <number>",
@@ -93,9 +93,9 @@ func newPRReviewCmd(s IO) *cobra.Command {
 			"--comments-file adds inline comments: a JSON array of\n" +
 			"{\"path\", \"line\", \"side\", \"body\"} objects, where line is the line\n" +
 			"number in the file and side is LEFT (the base) or RIGHT (the head, the\n" +
-			"default), in the pull request's head commit. A body is required to\n" +
-			"request changes, and to comment without inline comments. Prints the\n" +
-			"URL of the review.",
+			"default), in the pull request's head commit, or in --commit if given.\n" +
+			"A body is required to request changes, and to comment without inline\n" +
+			"comments. Prints the URL of the review.",
 		Args: cobra.ExactArgs(1),
 	}
 	repo := addRepoFlag(cmd)
@@ -104,12 +104,16 @@ func newPRReviewCmd(s IO) *cobra.Command {
 	cmd.Flags().BoolVarP(&comment, "comment", "c", false, "Comment on a pull request")
 	cmd.Flags().BoolVarP(&requestChanges, "request-changes", "r", false, "Request changes on a pull request")
 	cmd.Flags().StringVar(&commentsFile, "comments-file", "", "Read inline comments from a JSON file (use \"-\" to read from standard input)")
+	cmd.Flags().StringVar(&commit, "commit", "", "Review this commit SHA instead of the pull request's head")
 	cmd.MarkFlagsMutuallyExclusive("approve", "comment", "request-changes")
 	cmd.MarkFlagsOneRequired("approve", "comment", "request-changes")
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		number, err := parseNumber(args[0])
 		if err != nil {
 			return err
+		}
+		if c.Flags().Changed("commit") && !fullSHARE.MatchString(commit) {
+			return fmt.Errorf("invalid commit SHA %q: expected 40 lowercase hex digits", commit)
 		}
 		if commentsFile == "-" && c.Flags().Changed("body-file") && body.file == "-" {
 			return errors.New("--body-file and --comments-file can't both read standard input")
@@ -148,16 +152,25 @@ func newPRReviewCmd(s IO) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if commit != "" {
+			fields["commit_id"] = commit
+		}
 		if len(comments) > 0 {
 			fields["comments"] = comments
-			// The commit the lines are in, the head. GitHub defaults to it,
-			// but answered every review with inline comments and no commit_id
-			// on evadcmd/ivo#29 with a 5xx, so it's named here.
-			var pull apiPull
-			if _, err := api.get(ctx, repo.ref.path("pulls", strconv.Itoa(number)), nil, &pull); err != nil {
-				return err
+			// The commit the lines are in, the head unless --commit names
+			// one. GitHub defaults to the head, but answered every review with
+			// inline comments and no commit_id on evadcmd/ivo#29 with a 5xx,
+			// so it's named here.
+			if commit == "" {
+				var pull apiPull
+				if _, err := api.get(ctx, repo.ref.path("pulls", strconv.Itoa(number)), nil, &pull); err != nil {
+					return err
+				}
+				if !fullSHARE.MatchString(pull.Head.SHA) {
+					return fmt.Errorf("unexpected response reading pull request %d: head %q", number, pull.Head.SHA)
+				}
+				fields["commit_id"] = pull.Head.SHA
 			}
-			fields["commit_id"] = pull.Head.SHA
 		}
 		var review apiReview
 		if err := api.send(ctx, http.MethodPost, repo.ref.path("pulls", strconv.Itoa(number), "reviews"), fields, &review); err != nil {

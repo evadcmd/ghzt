@@ -15,7 +15,7 @@ func TestPRReview(t *testing.T) {
 	var got []request
 	mux := http.NewServeMux()
 	mux.Handle("POST /repos/o/r/pulls/3/reviews", recorder(t, &got, reviewURL))
-	mux.HandleFunc("GET /repos/o/r/pulls/3", reply(map[string]any{"number": 3, "head": map[string]any{"ref": "x", "sha": "abc123"}}))
+	mux.HandleFunc("GET /repos/o/r/pulls/3", reply(map[string]any{"number": 3, "head": map[string]any{"ref": "x", "sha": testSHA}}))
 	s := fakeGitHub(t, mux)
 	root := withRoot(t, &s)
 	comments := `[{"path": "a/b.go", "line": 7, "body": "why?"}, {"path": "c.go", "line": 2, "side": "LEFT", "body": "gone"}]`
@@ -30,10 +30,15 @@ func TestPRReview(t *testing.T) {
 		{[]string{"--approve"}, map[string]any{"event": "APPROVE"}},
 		{[]string{"-a", "-b", "lgtm"}, map[string]any{"event": "APPROVE", "body": "lgtm"}},
 		{[]string{"-r", "-b", "no"}, map[string]any{"event": "REQUEST_CHANGES", "body": "no"}},
-		{[]string{"-c", "--comments-file", "c.json"}, map[string]any{"event": "COMMENT", "commit_id": "abc123", "comments": []any{
+		{[]string{"-c", "--comments-file", "c.json"}, map[string]any{"event": "COMMENT", "commit_id": testSHA, "comments": []any{
 			map[string]any{"path": "a/b.go", "line": float64(7), "body": "why?"},
 			map[string]any{"path": "c.go", "line": float64(2), "side": "LEFT", "body": "gone"},
 		}}},
+		{[]string{"-c", "--comments-file", "c.json", "--commit", commitSHA}, map[string]any{"event": "COMMENT", "commit_id": commitSHA, "comments": []any{
+			map[string]any{"path": "a/b.go", "line": float64(7), "body": "why?"},
+			map[string]any{"path": "c.go", "line": float64(2), "side": "LEFT", "body": "gone"},
+		}}},
+		{[]string{"-a", "--commit", commitSHA}, map[string]any{"event": "APPROVE", "commit_id": commitSHA}},
 	} {
 		got = nil
 		args := append([]string{"gh", "pr", "review", "3", "-R", "o/r"}, tc.args...)
@@ -47,7 +52,7 @@ func TestPRReview(t *testing.T) {
 	got = nil
 	s.In = strings.NewReader(comments)
 	code, _, errOut := runWith(s, "gh", "pr", "review", "3", "-R", "o/r", "-c", "-b", "see inline", "--comments-file", "-")
-	if code != exitOK || len(got) != 1 || got[0].Body["body"] != "see inline" || len(got[0].Body["comments"].([]any)) != 2 || got[0].Body["commit_id"] != "abc123" {
+	if code != exitOK || len(got) != 1 || got[0].Body["body"] != "see inline" || len(got[0].Body["comments"].([]any)) != 2 || got[0].Body["commit_id"] != testSHA {
 		t.Errorf("comments from stdin: code %d, stderr %q, requests %+v", code, errOut, got)
 	}
 }
@@ -94,6 +99,9 @@ func TestPRReviewInvalid(t *testing.T) {
 		{[]string{"-c", "--comments-file", "object.json"}, "cannot unmarshal object"},
 		{[]string{"-c", "--comments-file", "missing.json"}, "missing.json"},
 		{[]string{"-c", "-F", "-", "--comments-file", "-"}, "can't both read standard input"},
+		{[]string{"-a", "--commit", "abc1234"}, `invalid commit SHA "abc1234"`},
+		{[]string{"-a", "--commit", ""}, `invalid commit SHA ""`},
+		{[]string{"-a", "--commit", strings.ToUpper(testSHA)}, "invalid commit SHA"},
 	} {
 		args := append([]string{"gh", "pr", "review", "3", "-R", "o/r"}, tc.args...)
 		code, _, errOut := runWith(s, args...)
@@ -103,6 +111,25 @@ func TestPRReviewInvalid(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("bad reviews sent %d requests", len(got))
+	}
+}
+
+func TestPRReviewBadHead(t *testing.T) {
+	var got []request
+	mux := http.NewServeMux()
+	mux.Handle("POST /repos/o/r/pulls/3/reviews", recorder(t, &got, reviewURL))
+	mux.HandleFunc("GET /repos/o/r/pulls/3", reply(map[string]any{"number": 3, "head": map[string]any{"ref": "x"}}))
+	s := fakeGitHub(t, mux)
+	root := withRoot(t, &s)
+	if err := os.WriteFile(filepath.Join(root, "c.json"), []byte(`[{"path": "a.go", "line": 1, "body": "x"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := runWith(s, "gh", "pr", "review", "3", "-R", "o/r", "-c", "--comments-file", "c.json")
+	if code != exitError || !strings.Contains(errOut, `unexpected response reading pull request 3: head ""`) {
+		t.Errorf("code %d, stderr %q", code, errOut)
+	}
+	if len(got) != 0 {
+		t.Errorf("sent %d reviews after a bad head", len(got))
 	}
 }
 
